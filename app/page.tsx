@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
-import { supabase } from "@/lib/supabase";
+import { supabase } from "../lib/supabase";
 import {
   Folder,
   CheckSquare,
@@ -119,7 +119,7 @@ export default function Home() {
     return () => subscription.unsubscribe();
   }, []);
 
-  // クラウド同期 (Supabase からデータ取得 & Realtime監視)
+  // クラウド同期 (Supabase からデータ取得)
   useEffect(() => {
     if (!user) return;
 
@@ -179,13 +179,6 @@ export default function Home() {
       }
     }
   }, [activeNoteId]);
-
-  const execCmd = (command: string, value: string = "") => {
-    document.execCommand(command, false, value);
-    if (editorRef.current) {
-      updateActiveNote({ content: editorRef.current.innerHTML });
-    }
-  };
 
   const createNewNote = async () => {
     if (!user) return;
