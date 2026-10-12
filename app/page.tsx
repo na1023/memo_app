@@ -3,7 +3,7 @@
 export const dynamic = "force-dynamic";
 
 import React, { useState, useEffect, useRef } from "react";
-import { supabase } from "../lib/supabase";
+import { getSupabase } from "../lib/supabase";
 import {
   Folder,
   CheckSquare,
@@ -71,8 +71,6 @@ const DEFAULT_FOLDERS: FolderItem[] = [
   { id: "ideas", name: "アイデア" },
 ];
 
-const DEFAULT_CATEGORIES = ["重要", "日常", "買い物", "プロジェクト"];
-
 export default function Home() {
   const [user, setUser] = useState<any>(null);
   const [authEmail, setAuthEmail] = useState("");
@@ -80,7 +78,6 @@ export default function Home() {
   const [isSignUp, setIsSignUp] = useState(false);
   const [authError, setAuthError] = useState("");
 
-  const [activeTab, setActiveTab] = useState<"notes" | "todos">("notes");
   const [folders, setFolders] = useState<FolderItem[]>(DEFAULT_FOLDERS);
   const [selectedFolder, setSelectedFolder] = useState<string>("work");
 
@@ -88,14 +85,13 @@ export default function Home() {
   const [todos, setTodos] = useState<Todo[]>([]);
   const [activeNoteId, setActiveNoteId] = useState<string | null>(null);
 
-  const [searchQuery, setSearchQuery] = useState("");
-  const [isMobileDetailOpen, setIsMobileDetailOpen] = useState(false);
-
   const editorRef = useRef<HTMLDivElement>(null);
 
-  // ブラウザ（クライアントサイド）でのみ実行
+  // ブラウザ上（クライアントサイド）でのみ初期化
   useEffect(() => {
     if (typeof window === "undefined") return;
+
+    const supabase = getSupabase();
 
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null);
@@ -111,6 +107,8 @@ export default function Home() {
   // クラウド同期
   useEffect(() => {
     if (!user || typeof window === "undefined") return;
+
+    const supabase = getSupabase();
 
     const fetchData = async () => {
       try {
@@ -147,6 +145,8 @@ export default function Home() {
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError("");
+    const supabase = getSupabase();
+
     if (isSignUp) {
       const { error } = await supabase.auth.signUp({ email: authEmail, password: authPassword });
       if (error) setAuthError(error.message);
@@ -158,6 +158,7 @@ export default function Home() {
   };
 
   const handleLogout = async () => {
+    const supabase = getSupabase();
     await supabase.auth.signOut();
     setUser(null);
   };
@@ -174,6 +175,7 @@ export default function Home() {
 
   const createNewNote = async () => {
     if (!user) return;
+    const supabase = getSupabase();
     const newNote: Note = {
       id: Date.now().toString(),
       title: "無題のメモ",
@@ -185,7 +187,6 @@ export default function Home() {
     };
     setNotes([newNote, ...notes]);
     setActiveNoteId(newNote.id);
-    setIsMobileDetailOpen(true);
 
     await supabase.from("notes").insert({
       id: newNote.id,
@@ -201,6 +202,7 @@ export default function Home() {
 
   const updateActiveNote = async (fields: Partial<Note>) => {
     if (!activeNoteId || !user) return;
+    const supabase = getSupabase();
     const updatedAt = new Date().toLocaleString("ja-JP");
     setNotes((prev) =>
       prev.map((n) => (n.id === activeNoteId ? { ...n, ...fields, updatedAt } : n))
