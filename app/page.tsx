@@ -2,7 +2,27 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import { getSupabase } from "../lib/supabase";
-import { Folder, Plus, LogOut, User, Lock } from "lucide-react";
+import {
+  Folder,
+  Plus,
+  LogOut,
+  User,
+  Lock,
+  Search,
+  Pin,
+  FileText,
+  Menu,
+  X,
+  ChevronRight,
+  Bold,
+  Italic,
+  List,
+  CheckSquare,
+  Sparkles,
+  Smartphone,
+  Check,
+  Trash2,
+} from "lucide-react";
 
 interface Note {
   id: string;
@@ -10,20 +30,19 @@ interface Note {
   content: string;
   folderId: string;
   isPinned: boolean;
-  images: string[];
   updatedAt: string;
 }
 
 interface FolderItem {
   id: string;
   name: string;
-  sort_order?: number;
+  icon?: string;
 }
 
 const DEFAULT_FOLDERS: FolderItem[] = [
-  { id: "work", name: "仕事" },
+  { id: "work", name: "仕事・プロジェクト" },
   { id: "personal", name: "プライベート" },
-  { id: "ideas", name: "アイデア" },
+  { id: "ideas", name: "アイデアノート" },
 ];
 
 export default function Home() {
@@ -39,6 +58,10 @@ export default function Home() {
   const [selectedFolder, setSelectedFolder] = useState<string>("work");
   const [notes, setNotes] = useState<Note[]>([]);
   const [activeNoteId, setActiveNoteId] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+
+  // モバイルビュー状態 ( 'folders' | 'list' | 'editor' )
+  const [mobileView, setMobileView] = useState<"folders" | "list" | "editor">("list");
 
   const editorRef = useRef<HTMLDivElement>(null);
 
@@ -48,7 +71,6 @@ export default function Home() {
 
   useEffect(() => {
     if (!mounted) return;
-
     try {
       const supabase = getSupabase();
       supabase.auth.getSession().then(({ data: { session } }) => {
@@ -62,43 +84,52 @@ export default function Home() {
       return () => subscription.unsubscribe();
     } catch (e: any) {
       console.error(e);
-      setAuthError(e.message || "Supabaseの初期化に失敗しました。");
+      setAuthError(e.message || "Supabase初期化エラー");
     }
   }, [mounted]);
 
   useEffect(() => {
     if (!mounted || !user) return;
-
     const fetchData = async () => {
       try {
         const supabase = getSupabase();
-        const { data: fData } = await supabase.from("folders").select("*").order("sort_order", { ascending: true });
-        if (fData && fData.length > 0) setFolders(fData);
-
         const { data: nData } = await supabase.from("notes").select("*").order("updated_at", { ascending: false });
         if (nData) {
-          const mappedNotes = nData.map((n) => ({
+          const mapped = nData.map((n) => ({
             id: n.id,
             title: n.title,
             content: n.content,
             folderId: n.folder_id,
-            isPinned: n.is_pinned,
-            images: n.images || [],
+            isPinned: n.is_pinned || false,
             updatedAt: n.updated_at,
           }));
-          setNotes(mappedNotes);
-          if (mappedNotes.length > 0) setActiveNoteId(mappedNotes[0].id);
+          setNotes(mapped);
+          if (mapped.length > 0 && !activeNoteId) setActiveNoteId(mapped[0].id);
         }
       } catch (e) {
         console.error(e);
       }
     };
-
     fetchData();
   }, [mounted, user]);
 
+  useEffect(() => {
+    if (editorRef.current && activeNote) {
+      if (editorRef.current.innerHTML !== activeNote.content) {
+        editorRef.current.innerHTML = activeNote.content;
+      }
+    }
+  }, [activeNoteId]);
+
   if (!mounted) {
-    return <div className="min-h-screen bg-slate-900 flex items-center justify-center text-white text-sm">読み込み中...</div>;
+    return (
+      <div className="h-[100dvh] w-full bg-slate-950 flex items-center justify-center text-slate-400 font-sans text-sm">
+        <div className="flex items-center gap-2 animate-pulse">
+          <Sparkles className="w-5 h-5 text-amber-400" />
+          <span>SmartHub 読み込み中...</span>
+        </div>
+      </div>
+    );
   }
 
   const handleAuth = async (e: React.FormEvent) => {
@@ -108,34 +139,16 @@ export default function Home() {
 
     try {
       const supabase = getSupabase();
-
       if (isSignUp) {
-        const { data, error } = await supabase.auth.signUp({
-          email: authEmail,
-          password: authPassword,
-        });
-
-        if (error) {
-          setAuthError(error.message);
-        } else if (data.user && data.session) {
-          setUser(data.user);
-        } else if (data.user && !data.session) {
-          alert("登録完了メールを送信しました。メールボックスを確認して認証を完了させてください。");
-        }
+        const { data, error } = await supabase.auth.signUp({ email: authEmail, password: authPassword });
+        if (error) setAuthError(error.message);
+        else if (data.user && !data.session) alert("登録完了メールをご確認ください。");
       } else {
-        const { data, error } = await supabase.auth.signInWithPassword({
-          email: authEmail,
-          password: authPassword,
-        });
-
-        if (error) {
-          setAuthError("メールアドレスまたはパスワードが正しくありません。");
-        } else {
-          setUser(data.user);
-        }
+        const { data, error } = await supabase.auth.signInWithPassword({ email: authEmail, password: authPassword });
+        if (error) setAuthError("メールアドレスまたはパスワードが正しくありません。");
       }
     } catch (err: any) {
-      setAuthError(err.message || "認証エラーが発生しました。");
+      setAuthError(err.message || "認証エラー");
     } finally {
       setLoading(false);
     }
@@ -156,15 +169,15 @@ export default function Home() {
     const supabase = getSupabase();
     const newNote: Note = {
       id: Date.now().toString(),
-      title: "無題のメモ",
+      title: "新しいメモ",
       content: "",
       folderId: selectedFolder,
       isPinned: false,
-      images: [],
-      updatedAt: new Date().toLocaleString("ja-JP"),
+      updatedAt: new Date().toLocaleDateString("ja-JP", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }),
     };
     setNotes([newNote, ...notes]);
     setActiveNoteId(newNote.id);
+    setMobileView("editor");
 
     await supabase.from("notes").insert({
       id: newNote.id,
@@ -173,7 +186,6 @@ export default function Home() {
       title: newNote.title,
       content: newNote.content,
       is_pinned: newNote.isPinned,
-      images: newNote.images,
       updated_at: newNote.updatedAt,
     });
   };
@@ -181,65 +193,85 @@ export default function Home() {
   const updateActiveNote = async (fields: Partial<Note>) => {
     if (!activeNoteId || !user) return;
     const supabase = getSupabase();
-    const updatedAt = new Date().toLocaleString("ja-JP");
+    const updatedAt = new Date().toLocaleDateString("ja-JP", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+
     setNotes((prev) =>
       prev.map((n) => (n.id === activeNoteId ? { ...n, ...fields, updatedAt } : n))
     );
 
     await supabase.from("notes").update({
-      title: fields.title,
-      content: fields.content,
-      folder_id: fields.folderId,
-      is_pinned: fields.isPinned,
-      images: fields.images,
+      title: fields.title !== undefined ? fields.title : activeNote?.title,
+      content: fields.content !== undefined ? fields.content : activeNote?.content,
+      folder_id: fields.folderId !== undefined ? fields.folderId : activeNote?.folderId,
+      is_pinned: fields.isPinned !== undefined ? fields.isPinned : activeNote?.isPinned,
       updated_at: updatedAt,
     }).eq("id", activeNoteId);
   };
 
-  const filteredNotes = notes.filter((n) => n.folderId === selectedFolder);
+  const deleteNote = async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!user || !confirm("このメモを削除してもよろしいですか？")) return;
+    const supabase = getSupabase();
+    setNotes(notes.filter((n) => n.id !== id));
+    if (activeNoteId === id) setActiveNoteId(null);
+    await supabase.from("notes").delete().eq("id", id);
+  };
+
+  const formatExec = (cmd: string, val: string = "") => {
+    document.execCommand(cmd, false, val);
+    if (editorRef.current) updateActiveNote({ content: editorRef.current.innerHTML });
+  };
+
+  const filteredNotes = notes
+    .filter((n) => n.folderId === selectedFolder)
+    .filter((n) => n.title.toLowerCase().includes(searchQuery.toLowerCase()) || n.content.toLowerCase().includes(searchQuery.toLowerCase()))
+    .sort((a, b) => (b.isPinned ? 1 : 0) - (a.isPinned ? 1 : 0));
 
   if (!user) {
     return (
-      <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
-        <div className="bg-white rounded-2xl shadow-2xl p-6 md:p-8 max-w-md w-full space-y-6">
-          <div className="text-center">
-            <h1 className="text-2xl font-bold text-slate-900">SmartHub</h1>
-            <p className="text-xs text-slate-500 mt-1">スマホとPCでリアルタイム同期メモ帳</p>
+      <div className="h-[100dvh] w-full bg-gradient-to-br from-slate-950 via-slate-900 to-amber-950/20 flex items-center justify-center p-4">
+        <div className="bg-slate-900/80 backdrop-blur-xl border border-white/10 rounded-3xl p-6 sm:p-10 max-w-md w-full shadow-2xl space-y-6">
+          <div className="text-center space-y-2">
+            <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-400 mb-2">
+              <Sparkles className="w-6 h-6" />
+            </div>
+            <h1 className="text-2xl font-black tracking-wider text-white">SmartHub</h1>
+            <p className="text-xs text-slate-400">極上の書き心地とマルチデバイスリアルタイム同期</p>
           </div>
 
           <form onSubmit={handleAuth} className="space-y-4">
             {authError && (
-              <div className="text-xs bg-red-50 text-red-600 p-3 rounded-lg border border-red-200 break-words">
+              <div className="text-xs bg-red-500/10 border border-red-500/30 text-red-400 p-3 rounded-xl break-words text-center">
                 {authError}
               </div>
             )}
 
-            <div>
-              <label className="text-xs font-semibold text-slate-600 mb-1 block">メールアドレス</label>
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-slate-400 ml-1">メールアドレス</label>
               <div className="relative">
-                <User className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <User className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" />
                 <input
                   type="email"
                   required
                   value={authEmail}
                   onChange={(e) => setAuthEmail(e.target.value)}
-                  className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800"
+                  className="w-full pl-10 pr-4 py-3 bg-slate-800/60 border border-white/10 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/50 transition"
                   placeholder="name@example.com"
                 />
               </div>
             </div>
 
-            <div>
-              <label className="text-xs font-semibold text-slate-600 mb-1 block">パスワード (6文字以上)</label>
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-slate-400 ml-1">パスワード (6文字以上)</label>
               <div className="relative">
-                <Lock className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <Lock className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" />
                 <input
                   type="password"
                   required
                   minLength={6}
                   value={authPassword}
                   onChange={(e) => setAuthPassword(e.target.value)}
-                  className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800"
+                  className="w-full pl-10 pr-4 py-3 bg-slate-800/60 border border-white/10 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/50 transition"
                   placeholder="••••••••"
                 />
               </div>
@@ -248,22 +280,19 @@ export default function Home() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-medium text-sm rounded-lg transition disabled:opacity-50"
+              className="w-full py-3 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold text-sm rounded-xl transition shadow-lg shadow-amber-500/20 disabled:opacity-50 active:scale-[0.98]"
             >
-              {loading ? "送信中..." : isSignUp ? "新規アカウント登録" : "ログイン"}
+              {loading ? "処理中..." : isSignUp ? "新規アカウント作成" : "ログイン"}
             </button>
           </form>
 
           <div className="text-center">
             <button
               type="button"
-              onClick={() => {
-                setIsSignUp(!isSignUp);
-                setAuthError("");
-              }}
-              className="text-xs text-indigo-600 hover:underline"
+              onClick={() => { setIsSignUp(!isSignUp); setAuthError(""); }}
+              className="text-xs text-slate-400 hover:text-amber-400 transition"
             >
-              {isSignUp ? "アカウントをお持ちの方はこちら (ログイン)" : "初めての方はこちら (アカウント作成)"}
+              {isSignUp ? "アカウントをお持ちの方（ログイン）" : "初めての方（新規登録）"}
             </button>
           </div>
         </div>
@@ -272,73 +301,196 @@ export default function Home() {
   }
 
   return (
-    <div className="flex flex-col md:flex-row h-screen bg-slate-100 text-slate-800 font-sans overflow-hidden">
-      <aside className="w-64 bg-slate-900 text-slate-300 flex flex-col border-r border-slate-800">
-        <div className="p-4 border-b border-slate-800 flex items-center justify-between">
-          <h1 className="text-lg font-bold text-white">SmartHub</h1>
-          <button onClick={handleLogout} className="text-slate-400 hover:text-red-400 p-1" title="ログアウト">
+    <div className="h-[100dvh] w-full bg-slate-950 text-slate-100 font-sans flex flex-col md:flex-row overflow-hidden select-none">
+      
+      {/* サイドバー（PC表示 / モバイル時は画面切替） */}
+      <aside className={`w-full md:w-64 bg-slate-900/90 border-r border-white/10 flex flex-col shrink-0 ${mobileView === 'folders' ? 'flex' : 'hidden md:flex'}`}>
+        <div className="p-4 border-b border-white/10 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-lg bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400">
+              <Sparkles className="w-4 h-4" />
+            </div>
+            <span className="font-bold tracking-wide text-white">SmartHub</span>
+          </div>
+          <button onClick={handleLogout} className="text-slate-400 hover:text-red-400 p-1.5 rounded-lg hover:bg-white/5 transition" title="ログアウト">
             <LogOut className="w-4 h-4" />
           </button>
         </div>
 
-        <div className="flex-1 p-3 overflow-y-auto space-y-1">
-          <div className="text-xs font-semibold text-slate-500 uppercase px-2 mb-2">フォルダ</div>
-          {folders.map((f) => (
-            <button
-              key={f.id}
-              onClick={() => setSelectedFolder(f.id)}
-              className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition ${
-                selectedFolder === f.id ? "bg-slate-800 text-indigo-400" : "hover:bg-slate-800/50 text-slate-400"
-              }`}
-            >
-              <Folder className="w-4 h-4" /> {f.name}
-            </button>
-          ))}
-        </div>
-      </aside>
-
-      <main className="flex-1 flex bg-white overflow-hidden">
-        <div className="w-80 border-r border-slate-200 flex flex-col bg-slate-50/50">
-          <div className="p-3 border-b border-slate-200 flex justify-between items-center">
-            <span className="text-xs font-semibold text-slate-500">メモ一覧 ({filteredNotes.length})</span>
-            <button onClick={createNewNote} className="flex items-center gap-1 text-xs bg-indigo-600 text-white px-2.5 py-1 rounded-md">
-              <Plus className="w-3.5 h-3.5" /> 新規
-            </button>
-          </div>
-          <div className="flex-1 overflow-y-auto divide-y divide-slate-100">
-            {filteredNotes.map((note) => (
-              <div
-                key={note.id}
-                onClick={() => setActiveNoteId(note.id)}
-                className={`p-3 cursor-pointer ${activeNoteId === note.id ? "bg-indigo-50/60 border-l-4 border-indigo-600" : ""}`}
+        <div className="p-3">
+          <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider px-2 mb-2">フォルダ</div>
+          <div className="space-y-1">
+            {folders.map((f) => (
+              <button
+                key={f.id}
+                onClick={() => { setSelectedFolder(f.id); setMobileView('list'); }}
+                className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm transition ${
+                  selectedFolder === f.id
+                    ? "bg-amber-500/10 border border-amber-500/30 text-amber-400 font-medium"
+                    : "hover:bg-white/5 text-slate-400"
+                }`}
               >
-                <h3 className="text-sm font-semibold text-slate-800 truncate">{note.title || "無題のメモ"}</h3>
-                <p className="text-xs text-slate-500 line-clamp-1 mt-1">{note.content.replace(/<[^>]*>/g, "") || "内容なし"}</p>
-              </div>
+                <div className="flex items-center gap-2.5">
+                  <Folder className="w-4 h-4" />
+                  <span>{f.name}</span>
+                </div>
+                <ChevronRight className="w-3.5 h-3.5 opacity-40" />
+              </button>
             ))}
           </div>
         </div>
+      </aside>
 
-        {activeNote ? (
-          <div className="flex-1 flex flex-col overflow-y-auto p-6 max-w-4xl mx-auto w-full">
+      {/* メモ一覧カラム */}
+      <section className={`w-full md:w-80 bg-slate-900/40 border-r border-white/10 flex flex-col shrink-0 ${mobileView === 'list' ? 'flex' : 'hidden md:flex'}`}>
+        <div className="p-3 border-b border-white/10 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold text-slate-400">
+              {folders.find(f => f.id === selectedFolder)?.name} ({filteredNotes.length})
+            </span>
+            <button
+              onClick={createNewNote}
+              className="flex items-center gap-1.5 text-xs bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold px-3 py-1.5 rounded-lg shadow-md transition active:scale-95"
+            >
+              <Plus className="w-3.5 h-3.5" /> 新規
+            </button>
+          </div>
+          <div className="relative">
+            <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
             <input
               type="text"
-              value={activeNote.title}
-              onChange={(e) => updateActiveNote({ title: e.target.value })}
-              className="text-2xl font-bold border-none focus:outline-none mb-4"
-              placeholder="タイトルを入力..."
-            />
-            <div
-              ref={editorRef}
-              contentEditable
-              onInput={() => editorRef.current && updateActiveNote({ content: editorRef.current.innerHTML })}
-              className="flex-1 w-full border-none focus:outline-none text-slate-700 leading-relaxed min-h-[300px]"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="メモを検索..."
+              className="w-full pl-8 pr-3 py-1.5 bg-slate-800/50 border border-white/10 rounded-lg text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-amber-500/50"
             />
           </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto divide-y divide-white/5">
+          {filteredNotes.length === 0 ? (
+            <div className="p-8 text-center text-xs text-slate-500">メモがありません</div>
+          ) : (
+            filteredNotes.map((note) => (
+              <div
+                key={note.id}
+                onClick={() => { setActiveNoteId(note.id); setMobileView('editor'); }}
+                className={`p-3.5 cursor-pointer transition group relative ${
+                  activeNoteId === note.id ? "bg-amber-500/10 border-l-2 border-amber-400" : "hover:bg-white/5"
+                }`}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <h3 className="text-xs font-semibold text-white truncate flex-1">{note.title || "無題のメモ"}</h3>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); updateActiveNote({ isPinned: !note.isPinned }); }}
+                      className={`p-1 rounded hover:bg-white/10 ${note.isPinned ? 'text-amber-400' : 'text-slate-600'}`}
+                    >
+                      <Pin className="w-3 h-3" />
+                    </button>
+                    <button
+                      onClick={(e) => deleteNote(note.id, e)}
+                      className="p-1 rounded text-slate-600 hover:text-red-400 hover:bg-white/10 opacity-0 group-hover:opacity-100 transition"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </div>
+                </div>
+                <p className="text-[11px] text-slate-400 line-clamp-2 mt-1 leading-relaxed">
+                  {note.content.replace(/<[^>]*>/g, "") || "内容なし"}
+                </p>
+                <div className="text-[9px] text-slate-500 mt-2">{note.updatedAt}</div>
+              </div>
+            ))
+          )}
+        </div>
+      </section>
+
+      {/* エディタメイン領域 */}
+      <main className={`flex-1 bg-slate-950 flex flex-col h-full overflow-hidden ${mobileView === 'editor' ? 'flex' : 'hidden md:flex'}`}>
+        {activeNote ? (
+          <>
+            {/* エディタ上部ツールバー */}
+            <div className="p-3 border-b border-white/10 flex items-center justify-between gap-2 bg-slate-900/30">
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => formatExec("bold")}
+                  className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 active:bg-white/20 transition"
+                  title="太字"
+                >
+                  <Bold className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => formatExec("italic")}
+                  className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 active:bg-white/20 transition"
+                  title="斜体"
+                >
+                  <Italic className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => formatExec("insertUnorderedList")}
+                  className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 active:bg-white/20 transition"
+                  title="箇条書き"
+                >
+                  <List className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="text-xs text-slate-500">{activeNote.updatedAt}</div>
+            </div>
+
+            {/* 本文エリア */}
+            <div className="flex-1 p-4 md:p-8 overflow-y-auto max-w-3xl mx-auto w-full space-y-4">
+              <input
+                type="text"
+                value={activeNote.title}
+                onChange={(e) => updateActiveNote({ title: e.target.value })}
+                className="w-full bg-transparent text-xl md:text-2xl font-bold text-white border-none focus:outline-none placeholder-slate-600"
+                placeholder="タイトルを入力..."
+              />
+              <div
+                ref={editorRef}
+                contentEditable
+                suppressContentEditableWarning
+                onInput={() => editorRef.current && updateActiveNote({ content: editorRef.current.innerHTML })}
+                className="w-full min-h-[350px] text-sm md:text-base text-slate-200 leading-relaxed border-none focus:outline-none select-text"
+              />
+            </div>
+          </>
         ) : (
-          <div className="flex-1 flex items-center justify-center text-slate-400 text-sm">メモを選択してください。</div>
+          <div className="flex-1 flex flex-col items-center justify-center text-slate-500 text-xs space-y-2">
+            <FileText className="w-8 h-8 stroke-1 text-slate-600" />
+            <span>メモを選択するか、新規作成してください</span>
+          </div>
         )}
       </main>
+
+      {/* モバイル用ボトムナビゲーションバー（iPhone対応） */}
+      <nav className="md:hidden bg-slate-900 border-t border-white/10 flex items-center justify-around py-2 px-4 safe-area-bottom">
+        <button
+          onClick={() => setMobileView('folders')}
+          className={`flex flex-col items-center gap-1 text-[10px] ${mobileView === 'folders' ? 'text-amber-400 font-bold' : 'text-slate-400'}`}
+        >
+          <Folder className="w-4 h-4" />
+          <span>フォルダ</span>
+        </button>
+        <button
+          onClick={() => setMobileView('list')}
+          className={`flex flex-col items-center gap-1 text-[10px] ${mobileView === 'list' ? 'text-amber-400 font-bold' : 'text-slate-400'}`}
+        >
+          <FileText className="w-4 h-4" />
+          <span>メモ一覧</span>
+        </button>
+        <button
+          onClick={() => setMobileView('editor')}
+          disabled={!activeNote}
+          className={`flex flex-col items-center gap-1 text-[10px] ${mobileView === 'editor' ? 'text-amber-400 font-bold' : 'text-slate-400'} disabled:opacity-30`}
+        >
+          <Sparkles className="w-4 h-4" />
+          <span>エディタ</span>
+        </button>
+      </nav>
+
     </div>
   );
 }
