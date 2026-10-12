@@ -2,13 +2,7 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import { getSupabase } from "../lib/supabase";
-import {
-  Folder,
-  Plus,
-  LogOut,
-  User,
-  Lock,
-} from "lucide-react";
+import { Folder, Plus, LogOut, User, Lock } from "lucide-react";
 
 interface Note {
   id: string;
@@ -66,8 +60,9 @@ export default function Home() {
       });
 
       return () => subscription.unsubscribe();
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
+      setAuthError(e.message || "Supabaseの初期化に失敗しました。");
     }
   }, [mounted]);
 
@@ -125,7 +120,7 @@ export default function Home() {
         } else if (data.user && data.session) {
           setUser(data.user);
         } else if (data.user && !data.session) {
-          alert("登録完了メールを送信しました。メールフォルダを確認して認証を完了させてください。");
+          alert("登録完了メールを送信しました。メールボックスを確認して認証を完了させてください。");
         }
       } else {
         const { data, error } = await supabase.auth.signInWithPassword({
@@ -140,15 +135,17 @@ export default function Home() {
         }
       }
     } catch (err: any) {
-      setAuthError(err.message || "エラーが発生しました。");
+      setAuthError(err.message || "認証エラーが発生しました。");
     } finally {
       setLoading(false);
     }
   };
 
   const handleLogout = async () => {
-    const supabase = getSupabase();
-    await supabase.auth.signOut();
+    try {
+      const supabase = getSupabase();
+      await supabase.auth.signOut();
+    } catch (e) {}
     setUser(null);
   };
 
@@ -226,7 +223,7 @@ export default function Home() {
                   required
                   value={authEmail}
                   onChange={(e) => setAuthEmail(e.target.value)}
-                  className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800"
                   placeholder="name@example.com"
                 />
               </div>
@@ -242,7 +239,7 @@ export default function Home() {
                   minLength={6}
                   value={authPassword}
                   onChange={(e) => setAuthPassword(e.target.value)}
-                  className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800"
                   placeholder="••••••••"
                 />
               </div>
@@ -253,12 +250,13 @@ export default function Home() {
               disabled={loading}
               className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-medium text-sm rounded-lg transition disabled:opacity-50"
             >
-              {loading ? "処理中..." : isSignUp ? "新規アカウント登録" : "ログイン"}
+              {loading ? "送信中..." : isSignUp ? "新規アカウント登録" : "ログイン"}
             </button>
           </form>
 
           <div className="text-center">
             <button
+              type="button"
               onClick={() => {
                 setIsSignUp(!isSignUp);
                 setAuthError("");
