@@ -1,0 +1,11 @@
+{
+  "remoteName": "origin",
+  "projects": [
+    {
+      "id": "prj_1EjWBzkRmjrxeIp4qjFtWuH1zudh",
+      "name": "memo_app",
+      "directory": ".",
+      "orgId": "team_GlUMTktxzOlo3IimP6CIzIqe"
+    }
+  ]
+}

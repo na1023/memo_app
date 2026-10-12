@@ -1,7 +1,5 @@
 "use client";
 
-export const dynamic = "force-dynamic";
-
 import React, { useState, useEffect, useRef } from "react";
 import { getSupabase } from "../lib/supabase";
 import {
@@ -72,6 +70,7 @@ const DEFAULT_FOLDERS: FolderItem[] = [
 ];
 
 export default function Home() {
+  const [mounted, setMounted] = useState(false);
   const [user, setUser] = useState<any>(null);
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
@@ -87,31 +86,38 @@ export default function Home() {
 
   const editorRef = useRef<HTMLDivElement>(null);
 
-  // ブラウザ上（クライアントサイド）でのみ初期化
+  // マウントチェック（クライアントサイドのハイドレーションエラーを防止）
   useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    const supabase = getSupabase();
-
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
-    });
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
-    });
-
-    return () => subscription.unsubscribe();
+    setMounted(true);
   }, []);
+
+  // 認証チェック
+  useEffect(() => {
+    if (!mounted) return;
+
+    try {
+      const supabase = getSupabase();
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        setUser(session?.user ?? null);
+      });
+
+      const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+        setUser(session?.user ?? null);
+      });
+
+      return () => subscription.unsubscribe();
+    } catch (e) {
+      console.error(e);
+    }
+  }, [mounted]);
 
   // クラウド同期
   useEffect(() => {
-    if (!user || typeof window === "undefined") return;
-
-    const supabase = getSupabase();
+    if (!mounted || !user) return;
 
     const fetchData = async () => {
       try {
+        const supabase = getSupabase();
         const { data: fData } = await supabase.from("folders").select("*").order("sort_order", { ascending: true });
         if (fData && fData.length > 0) setFolders(fData);
 
@@ -140,7 +146,11 @@ export default function Home() {
     };
 
     fetchData();
-  }, [user]);
+  }, [mounted, user]);
+
+  if (!mounted) {
+    return <div className="min-h-screen bg-slate-900 flex items-center justify-center text-white text-sm">読み込み中...</div>;
+  }
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -164,14 +174,6 @@ export default function Home() {
   };
 
   const activeNote = notes.find((n) => n.id === activeNoteId);
-
-  useEffect(() => {
-    if (editorRef.current && activeNote) {
-      if (editorRef.current.innerHTML !== activeNote.content) {
-        editorRef.current.innerHTML = activeNote.content || "";
-      }
-    }
-  }, [activeNoteId]);
 
   const createNewNote = async () => {
     if (!user) return;
