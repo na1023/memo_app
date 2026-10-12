@@ -1,19 +1,30 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
+import { Inter } from "next/font/google";
 import "./globals.css";
 
+const inter = Inter({ subsets: ["latin"] });
+
 export const metadata: Metadata = {
-  title: "スマートメモ & ToDo 管理",
-  description: "フォルダ分け、AI要約・添削機能付きの高機能メモ＆ToDoアプリ",
+  title: "SmartHub - クラウドリアルタイム同期メモ",
+  description: "スマホとPCでリアルタイムに完全同期する最高峰のメモアプリ",
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({
   children,
-}: Readonly<{
+}: {
   children: React.ReactNode;
-}>) {
+}) {
   return (
     <html lang="ja">
-      <body>{children}</body>
+      <body className={inter.className}>{children}</body>
     </html>
   );
 }
