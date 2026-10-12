@@ -1,5 +1,7 @@
 "use client";
 
+export const dynamic = "force-dynamic";
+
 import React, { useState, useEffect, useRef } from "react";
 import { supabase } from "../lib/supabase";
 import {
@@ -81,32 +83,17 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState<"notes" | "todos">("notes");
   const [folders, setFolders] = useState<FolderItem[]>(DEFAULT_FOLDERS);
   const [selectedFolder, setSelectedFolder] = useState<string>("work");
-  const [newFolderName, setNewFolderName] = useState("");
-  const [isAddingFolder, setIsAddingFolder] = useState(false);
-
-  const [openFolderMenuId, setOpenFolderMenuId] = useState<string | null>(null);
-  const [editingFolderId, setEditingFolderId] = useState<string | null>(null);
-  const [editingFolderName, setEditingFolderName] = useState("");
-
-  const [todoCategories, setTodoCategories] = useState<string[]>(DEFAULT_CATEGORIES);
-  const [newCategoryName, setNewCategoryName] = useState("");
-  const [isAddingCategory, setIsAddingCategory] = useState(false);
 
   const [notes, setNotes] = useState<Note[]>([]);
   const [todos, setTodos] = useState<Todo[]>([]);
   const [activeNoteId, setActiveNoteId] = useState<string | null>(null);
 
   const [searchQuery, setSearchQuery] = useState("");
-  const [todoCategory, setTodoCategory] = useState("すべて");
-  const [newTodoText, setNewTodoText] = useState("");
-  const [newTodoCat, setNewTodoCat] = useState("日常");
-
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isMobileDetailOpen, setIsMobileDetailOpen] = useState(false);
 
   const editorRef = useRef<HTMLDivElement>(null);
 
-  // ブラウザ（クライアントサイド）でのみ Supabase 認証チェックを実行
+  // ブラウザ（クライアントサイド）でのみ実行
   useEffect(() => {
     if (typeof window === "undefined") return;
 
@@ -157,7 +144,6 @@ export default function Home() {
     fetchData();
   }, [user]);
 
-  // 認証処理
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError("");
@@ -230,20 +216,8 @@ export default function Home() {
     }).eq("id", activeNoteId);
   };
 
-  const deleteNote = async (id: string) => {
-    if (!user) return;
-    const updated = notes.filter((n) => n.id !== id);
-    setNotes(updated);
-    if (activeNoteId === id) {
-      setActiveNoteId(updated[0]?.id || null);
-      setIsMobileDetailOpen(false);
-    }
-    await supabase.from("notes").delete().eq("id", id);
-  };
-
   const filteredNotes = notes.filter((n) => n.folderId === selectedFolder);
 
-  // 未ログイン時の画面 (ログイン/新規登録)
   if (!user) {
     return (
       <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
@@ -302,7 +276,6 @@ export default function Home() {
 
   return (
     <div className="flex flex-col md:flex-row h-screen bg-slate-100 text-slate-800 font-sans overflow-hidden">
-      {/* メインアプリ表示 */}
       <aside className="w-64 bg-slate-900 text-slate-300 flex flex-col border-r border-slate-800">
         <div className="p-4 border-b border-slate-800 flex items-center justify-between">
           <h1 className="text-lg font-bold text-white">SmartHub</h1>
