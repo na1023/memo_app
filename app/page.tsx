@@ -4,36 +4,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { getSupabase } from "../lib/supabase";
 import {
   Folder,
-  CheckSquare,
-  FileText,
   Plus,
-  Trash2,
-  Star,
-  Search,
-  Share2,
-  Image as ImageIcon,
-  Check,
-  Tag,
-  Menu,
-  X,
-  ArrowLeft,
-  FolderPlus,
-  MoreVertical,
-  ArrowUp,
-  ArrowDown,
-  Edit2,
-  Bold,
-  Italic,
-  Strikethrough,
-  Palette,
-  List,
-  ListOrdered,
-  Square,
-  Circle,
-  Highlighter,
-  Undo,
-  Redo,
-  Table,
   LogOut,
   User,
   Lock,
@@ -47,14 +18,6 @@ interface Note {
   isPinned: boolean;
   images: string[];
   updatedAt: string;
-}
-
-interface Todo {
-  id: string;
-  text: string;
-  category: string;
-  completed: boolean;
-  createdAt: string;
 }
 
 interface FolderItem {
@@ -76,22 +39,19 @@ export default function Home() {
   const [authPassword, setAuthPassword] = useState("");
   const [isSignUp, setIsSignUp] = useState(false);
   const [authError, setAuthError] = useState("");
+  const [loading, setLoading] = useState(false);
 
   const [folders, setFolders] = useState<FolderItem[]>(DEFAULT_FOLDERS);
   const [selectedFolder, setSelectedFolder] = useState<string>("work");
-
   const [notes, setNotes] = useState<Note[]>([]);
-  const [todos, setTodos] = useState<Todo[]>([]);
   const [activeNoteId, setActiveNoteId] = useState<string | null>(null);
 
   const editorRef = useRef<HTMLDivElement>(null);
 
-  // マウントチェック（クライアントサイドのハイドレーションエラーを防止）
   useEffect(() => {
     setMounted(true);
   }, []);
 
-  // 認証チェック
   useEffect(() => {
     if (!mounted) return;
 
@@ -111,7 +71,6 @@ export default function Home() {
     }
   }, [mounted]);
 
-  // クラウド同期
   useEffect(() => {
     if (!mounted || !user) return;
 
@@ -135,11 +94,6 @@ export default function Home() {
           setNotes(mappedNotes);
           if (mappedNotes.length > 0) setActiveNoteId(mappedNotes[0].id);
         }
-
-        const { data: tData } = await supabase.from("todos").select("*").order("created_at", { ascending: false });
-        if (tData) {
-          setTodos(tData.map((t) => ({ id: t.id, text: t.text, category: t.category, completed: t.completed, createdAt: t.created_at })));
-        }
       } catch (e) {
         console.error(e);
       }
@@ -155,15 +109,40 @@ export default function Home() {
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError("");
-    const supabase = getSupabase();
+    setLoading(true);
 
-    if (isSignUp) {
-      const { error } = await supabase.auth.signUp({ email: authEmail, password: authPassword });
-      if (error) setAuthError(error.message);
-      else alert("登録完了メールを送信しました。メール内のリンクをご確認ください。");
-    } else {
-      const { error } = await supabase.auth.signInWithPassword({ email: authEmail, password: authPassword });
-      if (error) setAuthError("メールアドレスまたはパスワードが正しくありません。");
+    try {
+      const supabase = getSupabase();
+
+      if (isSignUp) {
+        const { data, error } = await supabase.auth.signUp({
+          email: authEmail,
+          password: authPassword,
+        });
+
+        if (error) {
+          setAuthError(error.message);
+        } else if (data.user && data.session) {
+          setUser(data.user);
+        } else if (data.user && !data.session) {
+          alert("登録完了メールを送信しました。メールフォルダを確認して認証を完了させてください。");
+        }
+      } else {
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email: authEmail,
+          password: authPassword,
+        });
+
+        if (error) {
+          setAuthError("メールアドレスまたはパスワードが正しくありません。");
+        } else {
+          setUser(data.user);
+        }
+      }
+    } catch (err: any) {
+      setAuthError(err.message || "エラーが発生しました。");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -232,7 +211,12 @@ export default function Home() {
           </div>
 
           <form onSubmit={handleAuth} className="space-y-4">
-            {authError && <div className="text-xs bg-red-50 text-red-600 p-2.5 rounded-lg">{authError}</div>}
+            {authError && (
+              <div className="text-xs bg-red-50 text-red-600 p-3 rounded-lg border border-red-200 break-words">
+                {authError}
+              </div>
+            )}
+
             <div>
               <label className="text-xs font-semibold text-slate-600 mb-1 block">メールアドレス</label>
               <div className="relative">
@@ -249,12 +233,13 @@ export default function Home() {
             </div>
 
             <div>
-              <label className="text-xs font-semibold text-slate-600 mb-1 block">パスワード</label>
+              <label className="text-xs font-semibold text-slate-600 mb-1 block">パスワード (6文字以上)</label>
               <div className="relative">
                 <Lock className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                 <input
                   type="password"
                   required
+                  minLength={6}
                   value={authPassword}
                   onChange={(e) => setAuthPassword(e.target.value)}
                   className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
@@ -263,13 +248,23 @@ export default function Home() {
               </div>
             </div>
 
-            <button type="submit" className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-medium text-sm rounded-lg transition">
-              {isSignUp ? "新規アカウント登録" : "ログイン (自動ログイン)"}
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-medium text-sm rounded-lg transition disabled:opacity-50"
+            >
+              {loading ? "処理中..." : isSignUp ? "新規アカウント登録" : "ログイン"}
             </button>
           </form>
 
           <div className="text-center">
-            <button onClick={() => setIsSignUp(!isSignUp)} className="text-xs text-indigo-600 hover:underline">
+            <button
+              onClick={() => {
+                setIsSignUp(!isSignUp);
+                setAuthError("");
+              }}
+              className="text-xs text-indigo-600 hover:underline"
+            >
               {isSignUp ? "アカウントをお持ちの方はこちら (ログイン)" : "初めての方はこちら (アカウント作成)"}
             </button>
           </div>
