@@ -106,8 +106,10 @@ export default function Home() {
 
   const editorRef = useRef<HTMLDivElement>(null);
 
-  // ログイン状態監視 (自動ログイン永続化)
+  // ブラウザ（クライアントサイド）でのみ Supabase 認証チェックを実行
   useEffect(() => {
+    if (typeof window === "undefined") return;
+
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null);
     });
@@ -119,32 +121,36 @@ export default function Home() {
     return () => subscription.unsubscribe();
   }, []);
 
-  // クラウド同期 (Supabase からデータ取得)
+  // クラウド同期
   useEffect(() => {
-    if (!user) return;
+    if (!user || typeof window === "undefined") return;
 
     const fetchData = async () => {
-      const { data: fData } = await supabase.from("folders").select("*").order("sort_order", { ascending: true });
-      if (fData && fData.length > 0) setFolders(fData);
+      try {
+        const { data: fData } = await supabase.from("folders").select("*").order("sort_order", { ascending: true });
+        if (fData && fData.length > 0) setFolders(fData);
 
-      const { data: nData } = await supabase.from("notes").select("*").order("updated_at", { ascending: false });
-      if (nData) {
-        const mappedNotes = nData.map((n) => ({
-          id: n.id,
-          title: n.title,
-          content: n.content,
-          folderId: n.folder_id,
-          isPinned: n.is_pinned,
-          images: n.images || [],
-          updatedAt: n.updated_at,
-        }));
-        setNotes(mappedNotes);
-        if (mappedNotes.length > 0) setActiveNoteId(mappedNotes[0].id);
-      }
+        const { data: nData } = await supabase.from("notes").select("*").order("updated_at", { ascending: false });
+        if (nData) {
+          const mappedNotes = nData.map((n) => ({
+            id: n.id,
+            title: n.title,
+            content: n.content,
+            folderId: n.folder_id,
+            isPinned: n.is_pinned,
+            images: n.images || [],
+            updatedAt: n.updated_at,
+          }));
+          setNotes(mappedNotes);
+          if (mappedNotes.length > 0) setActiveNoteId(mappedNotes[0].id);
+        }
 
-      const { data: tData } = await supabase.from("todos").select("*").order("created_at", { ascending: false });
-      if (tData) {
-        setTodos(tData.map((t) => ({ id: t.id, text: t.text, category: t.category, completed: t.completed, createdAt: t.created_at })));
+        const { data: tData } = await supabase.from("todos").select("*").order("created_at", { ascending: false });
+        if (tData) {
+          setTodos(tData.map((t) => ({ id: t.id, text: t.text, category: t.category, completed: t.completed, createdAt: t.created_at })));
+        }
+      } catch (e) {
+        console.error(e);
       }
     };
 
