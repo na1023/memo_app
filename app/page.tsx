@@ -47,17 +47,6 @@ interface FolderItem {
   name: string;
 }
 
-const DEFAULT_NOTE_FOLDERS: FolderItem[] = [
-  { id: "work_note", name: "仕事メモ" },
-  { id: "personal_note", name: "プライベート" },
-  { id: "ideas_note", name: "アイデア" },
-];
-
-const DEFAULT_TODO_CATEGORIES: FolderItem[] = [
-  { id: "work_todo", name: "仕事タスク" },
-  { id: "personal_todo", name: "プライベート" },
-];
-
 export default function Home() {
   const [mounted, setMounted] = useState(false);
   const [user, setUser] = useState<any>(null);
@@ -67,12 +56,12 @@ export default function Home() {
   const [authError, setAuthError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // フォルダ（メモ用 / ToDo用）
-  const [noteFolders, setNoteFolders] = useState<FolderItem[]>(DEFAULT_NOTE_FOLDERS);
-  const [selectedNoteFolder, setSelectedNoteFolder] = useState<string>("work_note");
-  
-  const [todoCategories, setTodoCategories] = useState<FolderItem[]>(DEFAULT_TODO_CATEGORIES);
-  const [selectedTodoCategory, setSelectedTodoCategory] = useState<string>("work_todo");
+  // フォルダ（初期値は空にし、DBから取得した内容を信頼する）
+  const [noteFolders, setNoteFolders] = useState<FolderItem[]>([]);
+  const [selectedNoteFolder, setSelectedNoteFolder] = useState<string>("");
+
+  const [todoCategories, setTodoCategories] = useState<FolderItem[]>([]);
+  const [selectedTodoCategory, setSelectedTodoCategory] = useState<string>("");
 
   const [newFolderInput, setNewFolderInput] = useState("");
   const [showFolderInput, setShowFolderInput] = useState(false);
@@ -133,19 +122,58 @@ export default function Home() {
     }
   }, [mounted]);
 
-  // クラウドデータ取得
+  // クラウドデータ取得（完全DB準拠）
   const fetchAllData = async () => {
     if (!user) return;
     setIsRefreshing(true);
     try {
       const supabase = getSupabase();
-      
-      const { data: nfData } = await supabase.from("folders").select("*");
+
+      // 1. メモ用フォルダ取得
+      const { data: nfData } = await supabase
+        .from("folders")
+        .select("*")
+        .eq("user_id", user.id);
+
       if (nfData && nfData.length > 0) {
-        setNoteFolders(nfData.map(f => ({ id: f.id, name: f.name })));
+        const mapped = nfData.map((f) => ({ id: f.id, name: f.name }));
+        setNoteFolders(mapped);
+        if (!selectedNoteFolder || !mapped.some((f) => f.id === selectedNoteFolder)) {
+          setSelectedNoteFolder(mapped[0].id);
+        }
+      } else {
+        // 初回のみデフォルト作成
+        const defaultF = { id: "work_note_" + user.id.slice(0, 5), name: "仕事メモ" };
+        await supabase.from("folders").insert({ id: defaultF.id, user_id: user.id, name: defaultF.name });
+        setNoteFolders([defaultF]);
+        setSelectedNoteFolder(defaultF.id);
       }
 
-      const { data: nData } = await supabase.from("notes").select("*").order("updated_at", { ascending: false });
+      // 2. ToDo用カテゴリ取得（ローカル・DB兼用）
+      const { data: tcData } = await supabase
+        .from("todo_categories")
+        .select("*")
+        .eq("user_id", user.id);
+
+      if (tcData && tcData.length > 0) {
+        const mappedCategory = tcData.map((c) => ({ id: c.id, name: c.name }));
+        setTodoCategories(mappedCategory);
+        if (!selectedTodoCategory || !mappedCategory.some((c) => c.id === selectedTodoCategory)) {
+          setSelectedTodoCategory(mappedCategory[0].id);
+        }
+      } else {
+        const defaultC = { id: "work_todo_" + user.id.slice(0, 5), name: "仕事タスク" };
+        setTodoCategories([defaultC]);
+        setSelectedTodoCategory(defaultC.id);
+      }
+
+      // 3. メモ取得
+      const { data: nData } = await supabase
+        .from("notes")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("updated_at", { ascending: false });
+
       if (nData) {
         const mapped = nData.map((n) => ({
           id: n.id,
@@ -159,15 +187,23 @@ export default function Home() {
         if (mapped.length > 0 && !activeNoteId) setActiveNoteId(mapped[0].id);
       }
 
-      const { data: tData } = await supabase.from("todos").select("*").order("created_at", { ascending: false });
+      // 4. ToDo取得
+      const { data: tData } = await supabase
+        .from("todos")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false });
+
       if (tData) {
-        setTodos(tData.map((t) => ({
-          id: t.id,
-          text: t.text,
-          category: t.category || "work_todo",
-          completed: t.completed || false,
-          createdAt: t.created_at,
-        })));
+        setTodos(
+          tData.map((t) => ({
+            id: t.id,
+            text: t.text,
+            category: t.category || "work_todo",
+            completed: t.completed || false,
+            createdAt: t.created_at,
+          }))
+        );
       }
     } catch (e) {
       console.error(e);
@@ -230,22 +266,38 @@ export default function Home() {
     setUser(null);
   };
 
-  // --- フォルダ/カテゴリ 操作 ---
+  // --- フォルダ/カテゴリ 操作（完全DB永続化） ---
   const handleCreateFolder = async () => {
     if (!newFolderInput.trim() || !user) return;
-    const newId = Date.now().toString();
+    const supabase = getSupabase();
+    const newId = "f_" + Date.now().toString();
     const newName = newFolderInput.trim();
 
     if (mainTab === "notes") {
       const newF = { id: newId, name: newName };
-      setNoteFolders([...noteFolders, newF]);
+      setNoteFolders((prev) => [...prev, newF]);
       setSelectedNoteFolder(newId);
-      const supabase = getSupabase();
-      await supabase.from("folders").insert({ id: newId, user_id: user.id, name: newName });
+
+      const { error } = await supabase.from("folders").insert({
+        id: newId,
+        user_id: user.id,
+        name: newName,
+      });
+
+      if (error) {
+        alert("フォルダの保存に失敗しました: " + error.message);
+        setNoteFolders((prev) => prev.filter((f) => f.id !== newId));
+      }
     } else {
       const newC = { id: newId, name: newName };
-      setTodoCategories([...todoCategories, newC]);
+      setTodoCategories((prev) => [...prev, newC]);
       setSelectedTodoCategory(newId);
+
+      await supabase.from("todo_categories").insert({
+        id: newId,
+        user_id: user.id,
+        name: newName,
+      }).catch(() => {});
     }
 
     setNewFolderInput("");
@@ -254,35 +306,44 @@ export default function Home() {
 
   const handleDeleteFolder = async (folderId: string, e: React.MouseEvent) => {
     e.stopPropagation();
+    const supabase = getSupabase();
+
     if (mainTab === "notes") {
       if (noteFolders.length <= 1) return alert("最後のフォルダは削除できません。");
       if (!confirm("このフォルダを削除しますか？（中のメモも削除されます）")) return;
 
       const updated = noteFolders.filter((f) => f.id !== folderId);
       setNoteFolders(updated);
-      if (selectedNoteFolder === folderId) setSelectedNoteFolder(updated[0].id);
+      if (selectedNoteFolder === folderId) setSelectedNoteFolder(updated[0]?.id || "");
 
-      const supabase = getSupabase();
-      await supabase.from("folders").delete().eq("id", folderId);
-      await supabase.from("notes").delete().eq("folder_id", folderId);
-      setNotes(notes.filter((n) => n.folderId !== folderId));
+      const { error } = await supabase.from("folders").delete().eq("id", folderId).eq("user_id", user.id);
+      if (error) {
+        alert("削除に失敗しました: " + error.message);
+        fetchAllData();
+        return;
+      }
+      await supabase.from("notes").delete().eq("folder_id", folderId).eq("user_id", user.id);
+      setNotes((prev) => prev.filter((n) => n.folderId !== folderId));
     } else {
       if (todoCategories.length <= 1) return alert("最後のカテゴリは削除できません。");
       if (!confirm("このカテゴリを削除しますか？")) return;
 
       const updated = todoCategories.filter((c) => c.id !== folderId);
       setTodoCategories(updated);
-      if (selectedTodoCategory === folderId) setSelectedTodoCategory(updated[0].id);
-      setTodos(todos.filter((t) => t.category !== folderId));
+      if (selectedTodoCategory === folderId) setSelectedTodoCategory(updated[0]?.id || "");
+
+      await supabase.from("todo_categories").delete().eq("id", folderId).eq("user_id", user.id).catch(() => {});
+      await supabase.from("todos").delete().eq("category", folderId).eq("user_id", user.id);
+      setTodos((prev) => prev.filter((t) => t.category !== folderId));
     }
   };
 
-  // --- メモ操作（DB同期補強版） ---
+  // --- メモ操作 ---
   const createNewNote = async () => {
     if (!user) return;
     const supabase = getSupabase();
     const newNote: Note = {
-      id: Date.now().toString(),
+      id: "n_" + Date.now().toString(),
       title: "新規メモ",
       content: "",
       folderId: selectedNoteFolder,
@@ -313,7 +374,6 @@ export default function Home() {
     if (!currentNote) return;
 
     const updatedNote = { ...currentNote, ...fields, updatedAt };
-
     setNotes((prev) => prev.map((n) => (n.id === activeNoteId ? updatedNote : n)));
 
     await supabase.from("notes").upsert({
@@ -333,7 +393,7 @@ export default function Home() {
     const supabase = getSupabase();
     setNotes(notes.filter((n) => n.id !== id));
     if (activeNoteId === id) setActiveNoteId(null);
-    await supabase.from("notes").delete().eq("id", id);
+    await supabase.from("notes").delete().eq("id", id).eq("user_id", user.id);
   };
 
   // --- ToDo操作 ---
@@ -343,7 +403,7 @@ export default function Home() {
     const supabase = getSupabase();
 
     const newTodo: Todo = {
-      id: Date.now().toString(),
+      id: "t_" + Date.now().toString(),
       text: newTodoText.trim(),
       category: selectedTodoCategory,
       completed: false,
@@ -372,14 +432,14 @@ export default function Home() {
     const nextCompleted = !target.completed;
     setTodos(todos.map((t) => (t.id === id ? { ...t, completed: nextCompleted } : t)));
 
-    await supabase.from("todos").update({ completed: nextCompleted }).eq("id", id);
+    await supabase.from("todos").update({ completed: nextCompleted }).eq("id", id).eq("user_id", user.id);
   };
 
   const deleteTodo = async (id: string) => {
     if (!user) return;
     const supabase = getSupabase();
     setTodos(todos.filter((t) => t.id !== id));
-    await supabase.from("todos").delete().eq("id", id);
+    await supabase.from("todos").delete().eq("id", id).eq("user_id", user.id);
   };
 
   // --- エクスポート & インポート ---
@@ -635,7 +695,7 @@ export default function Home() {
                 <Menu className="w-5 h-5" />
               </button>
               <span className="text-xs font-bold text-slate-700">
-                カテゴリ: {todoCategories.find(c => c.id === selectedTodoCategory)?.name}
+                カテゴリ: {todoCategories.find(c => c.id === selectedTodoCategory)?.name || "全般"}
               </span>
               <button onClick={fetchAllData} className={`p-1.5 text-slate-500 ${isRefreshing ? "animate-spin text-blue-600" : ""}`}>
                 <RotateCw className="w-4 h-4" />
@@ -647,7 +707,7 @@ export default function Home() {
                 <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
                   <CheckSquare className="w-5 h-5 text-blue-600" /> ToDoタスク
                 </h2>
-                <p className="text-xs text-slate-500 mt-0.5">カテゴリ: {todoCategories.find(c => c.id === selectedTodoCategory)?.name}</p>
+                <p className="text-xs text-slate-500 mt-0.5">カテゴリ: {todoCategories.find(c => c.id === selectedTodoCategory)?.name || "全般"}</p>
               </div>
               <span className="text-xs font-medium text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full">
                 {filteredTodos.filter(t => t.completed).length} / {filteredTodos.length} 完了
@@ -714,7 +774,7 @@ export default function Home() {
                   <Menu className="w-5 h-5" />
                 </button>
                 <span className="text-xs font-bold text-slate-800">
-                  {noteFolders.find(f => f.id === selectedNoteFolder)?.name}
+                  {noteFolders.find(f => f.id === selectedNoteFolder)?.name || "全般"}
                 </span>
                 <div className="flex items-center gap-1">
                   <button onClick={fetchAllData} className={`p-1.5 text-slate-500 ${isRefreshing ? "animate-spin text-blue-600" : ""}`}>
@@ -729,7 +789,7 @@ export default function Home() {
               <div className="p-3 border-b border-slate-200 space-y-2 bg-white">
                 <div className="hidden md:flex items-center justify-between">
                   <span className="text-xs font-bold text-slate-500">
-                    {noteFolders.find(f => f.id === selectedNoteFolder)?.name} ({filteredNotes.length})
+                    {noteFolders.find(f => f.id === selectedNoteFolder)?.name || "全般"} ({filteredNotes.length})
                   </span>
                   <button
                     onClick={createNewNote}
