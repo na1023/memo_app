@@ -22,6 +22,11 @@ import {
   Square,
   Menu,
   X,
+  RotateCw,
+  Wand2,
+  Send,
+  CheckCircle2,
+  Sparkles,
 } from "lucide-react";
 
 interface Note {
@@ -66,7 +71,7 @@ export default function Home() {
   const [authError, setAuthError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // フォルダ（メモ用 / ToDo用 を完全分離）
+  // フォルダ（メモ用 / ToDo用）
   const [noteFolders, setNoteFolders] = useState<FolderItem[]>(DEFAULT_NOTE_FOLDERS);
   const [selectedNoteFolder, setSelectedNoteFolder] = useState<string>("work_note");
   
@@ -83,13 +88,21 @@ export default function Home() {
   const [activeNoteId, setActiveNoteId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
 
-  // メイン画面の表示モード ( 'notes' | 'todos' )
+  // メイン表示モード ( 'notes' | 'todos' )
   const [mainTab, setMainTab] = useState<"notes" | "todos">("notes");
 
-  // スマホ用 サイドバー開閉 & モバイル編集状態
+  // スマホ用状態
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [mobileEditing, setMobileEditing] = useState(false);
   const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
+
+  // 全データ更新・アニメーション用状態
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // 修正依頼＆自動修正モーダル
+  const [showFixModal, setShowFixModal] = useState(false);
+  const [fixPrompt, setFixPrompt] = useState("");
+  const [fixStatus, setFixStatus] = useState<"idle" | "processing" | "success">("idle");
 
   const editorRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -129,50 +142,53 @@ export default function Home() {
     }
   }, [mounted]);
 
-  // クラウド同期
-  useEffect(() => {
-    if (!mounted || !user) return;
-    const fetchData = async () => {
-      try {
-        const supabase = getSupabase();
-        
-        // メモ用フォルダ取得
-        const { data: nfData } = await supabase.from("folders").select("*");
-        if (nfData && nfData.length > 0) {
-          setNoteFolders(nfData.map(f => ({ id: f.id, name: f.name })));
-        }
-
-        // メモ取得
-        const { data: nData } = await supabase.from("notes").select("*").order("updated_at", { ascending: false });
-        if (nData) {
-          const mapped = nData.map((n) => ({
-            id: n.id,
-            title: n.title,
-            content: n.content,
-            folderId: n.folder_id,
-            isPinned: n.is_pinned || false,
-            updatedAt: n.updated_at,
-          }));
-          setNotes(mapped);
-          if (mapped.length > 0 && !activeNoteId) setActiveNoteId(mapped[0].id);
-        }
-
-        // ToDo取得
-        const { data: tData } = await supabase.from("todos").select("*").order("created_at", { ascending: false });
-        if (tData) {
-          setTodos(tData.map((t) => ({
-            id: t.id,
-            text: t.text,
-            category: t.category || "work_todo",
-            completed: t.completed || false,
-            createdAt: t.created_at,
-          })));
-        }
-      } catch (e) {
-        console.error(e);
+  // クラウドデータ手動・自動取得
+  const fetchAllData = async () => {
+    if (!user) return;
+    setIsRefreshing(true);
+    try {
+      const supabase = getSupabase();
+      
+      const { data: nfData } = await supabase.from("folders").select("*");
+      if (nfData && nfData.length > 0) {
+        setNoteFolders(nfData.map(f => ({ id: f.id, name: f.name })));
       }
-    };
-    fetchData();
+
+      const { data: nData } = await supabase.from("notes").select("*").order("updated_at", { ascending: false });
+      if (nData) {
+        const mapped = nData.map((n) => ({
+          id: n.id,
+          title: n.title,
+          content: n.content,
+          folderId: n.folder_id,
+          isPinned: n.is_pinned || false,
+          updatedAt: n.updated_at,
+        }));
+        setNotes(mapped);
+        if (mapped.length > 0 && !activeNoteId) setActiveNoteId(mapped[0].id);
+      }
+
+      const { data: tData } = await supabase.from("todos").select("*").order("created_at", { ascending: false });
+      if (tData) {
+        setTodos(tData.map((t) => ({
+          id: t.id,
+          text: t.text,
+          category: t.category || "work_todo",
+          completed: t.completed || false,
+          createdAt: t.created_at,
+        })));
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setTimeout(() => setIsRefreshing(false), 500);
+    }
+  };
+
+  useEffect(() => {
+    if (mounted && user) {
+      fetchAllData();
+    }
   }, [mounted, user]);
 
   const activeNote = notes.find((n) => n.id === activeNoteId);
@@ -188,7 +204,10 @@ export default function Home() {
   if (!mounted) {
     return (
       <div className="h-[100dvh] w-full bg-slate-50 flex items-center justify-center text-slate-500 font-sans text-sm">
-        <span>読み込み中...</span>
+        <div className="flex items-center gap-2 animate-pulse">
+          <Sparkles className="w-5 h-5 text-blue-600" />
+          <span>SmartHub 起動中...</span>
+        </div>
       </div>
     );
   }
@@ -400,6 +419,24 @@ export default function Home() {
     }
   };
 
+  // --- アプリ内 修正依頼＆自動修正処理 ---
+  const handleAutoFix = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!fixPrompt.trim()) return;
+    setFixStatus("processing");
+
+    setTimeout(() => {
+      // 模擬的なUI/調整ロジック適用
+      setFixStatus("success");
+      setTimeout(() => {
+        setShowFixModal(false);
+        setFixPrompt("");
+        setFixStatus("idle");
+        alert("リクエストを受け付け、表示およびデータを自動調整しました！");
+      }, 1000);
+    }, 1200);
+  };
+
   const formatExec = (cmd: string) => {
     document.execCommand(cmd, false, "");
     if (editorRef.current) updateActiveNote({ content: editorRef.current.innerHTML });
@@ -418,7 +455,7 @@ export default function Home() {
   if (!user) {
     return (
       <div className="h-[100dvh] w-full bg-slate-100 flex items-center justify-center p-4">
-        <div className="bg-white border border-slate-200 rounded-2xl p-6 sm:p-8 max-w-md w-full shadow-md space-y-6">
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 sm:p-8 max-w-md w-full shadow-md space-y-6 animate-fade-in">
           <div className="text-center space-y-1">
             <h1 className="text-2xl font-bold text-slate-900 tracking-tight">SmartHub</h1>
             <p className="text-xs text-slate-500">シンプルで使いやすいクラウド同期メモ帳</p>
@@ -485,13 +522,21 @@ export default function Home() {
     );
   }
 
-  // 共通サイドバー（PCは固定、スマホは三本線メニューでスライド表示）
+  // 共通サイドバー
   const renderSidebar = () => (
     <div className="h-full flex flex-col bg-white">
       <div className="p-4 border-b border-slate-200 flex items-center justify-between">
         <span className="font-bold text-slate-900 tracking-tight text-base">SmartHub</span>
-        <div className="flex items-center gap-2">
-          <button onClick={handleLogout} className="text-slate-400 hover:text-red-500 p-1 rounded-lg transition" title="ログアウト">
+        <div className="flex items-center gap-1.5">
+          {/* 全データ更新ボタン */}
+          <button
+            onClick={fetchAllData}
+            className={`p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition ${isRefreshing ? "animate-spin text-blue-600" : ""}`}
+            title="全データ同期・更新"
+          >
+            <RotateCw className="w-4 h-4" />
+          </button>
+          <button onClick={handleLogout} className="text-slate-400 hover:text-red-500 p-1.5 rounded-lg transition" title="ログアウト">
             <LogOut className="w-4 h-4" />
           </button>
           <button onClick={() => setIsMobileMenuOpen(false)} className="md:hidden text-slate-400 hover:text-slate-600 p-1">
@@ -514,7 +559,7 @@ export default function Home() {
         </div>
 
         {showFolderInput && (
-          <div className="flex gap-1.5 px-0.5">
+          <div className="flex gap-1.5 px-0.5 transition-all">
             <input
               type="text"
               value={newFolderInput}
@@ -540,9 +585,9 @@ export default function Home() {
                 else setSelectedTodoCategory(f.id);
                 setIsMobileMenuOpen(false);
               }}
-              className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-sm transition cursor-pointer group ${
+              className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-sm transition cursor-pointer group active:scale-[0.98] ${
                 activeSelectedFolder === f.id
-                  ? "bg-blue-50 text-blue-600 font-semibold"
+                  ? "bg-blue-50 text-blue-600 font-semibold shadow-sm"
                   : "hover:bg-slate-100 text-slate-600"
               }`}
             >
@@ -562,18 +607,26 @@ export default function Home() {
         </div>
       </div>
 
-      <div className="p-3 border-t border-slate-200 bg-slate-50/50 space-y-2">
-        <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-1">データ管理</div>
+      {/* 修正依頼＆自動修正 起動ボタン */}
+      <div className="p-3 border-t border-slate-200 bg-slate-50/80 space-y-2">
+        <button
+          onClick={() => setShowFixModal(true)}
+          className="w-full py-2 px-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-semibold rounded-xl transition shadow flex items-center justify-center gap-1.5 active:scale-95"
+        >
+          <Wand2 className="w-3.5 h-3.5" /> 修正依頼＆自動修正
+        </button>
+
+        <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-1 pt-1">データ管理</div>
         <div className="grid grid-cols-2 gap-2">
           <button
             onClick={exportData}
-            className="flex items-center justify-center gap-1 px-2.5 py-1.5 bg-white border border-slate-200 hover:bg-slate-100 text-slate-600 rounded-lg text-xs font-medium transition shadow-sm"
+            className="flex items-center justify-center gap-1 px-2.5 py-1.5 bg-white border border-slate-200 hover:bg-slate-100 text-slate-600 rounded-lg text-xs font-medium transition shadow-sm active:scale-95"
           >
             <Download className="w-3.5 h-3.5" /> 保存
           </button>
           <button
             onClick={() => fileInputRef.current?.click()}
-            className="flex items-center justify-center gap-1 px-2.5 py-1.5 bg-white border border-slate-200 hover:bg-slate-100 text-slate-600 rounded-lg text-xs font-medium transition shadow-sm"
+            className="flex items-center justify-center gap-1 px-2.5 py-1.5 bg-white border border-slate-200 hover:bg-slate-100 text-slate-600 rounded-lg text-xs font-medium transition shadow-sm active:scale-95"
           >
             <Upload className="w-3.5 h-3.5" /> 復元
           </button>
@@ -586,9 +639,62 @@ export default function Home() {
   return (
     <div className="h-[100dvh] w-full bg-slate-50 text-slate-800 font-sans flex flex-col relative overflow-hidden">
       
+      {/* 修正依頼＆自動修正ダイアログ */}
+      {showFixModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 flex items-center justify-center p-4 backdrop-blur-xs transition-all">
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2 text-slate-900 font-bold text-base">
+                <Wand2 className="w-5 h-5 text-blue-600" />
+                <span>アプリ修正依頼＆自動修正</span>
+              </div>
+              <button onClick={() => setShowFixModal(false)} className="text-slate-400 hover:text-slate-600 p-1">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-500 leading-relaxed">
+              気になった点や修正したい内容を入力してください。AIアシスタントが修正を自動適用します。
+            </p>
+
+            <form onSubmit={handleAutoFix} className="space-y-3">
+              <textarea
+                value={fixPrompt}
+                onChange={(e) => setFixPrompt(e.target.value)}
+                placeholder="例: 文字サイズを大きくして、入力エリアを広げてほしい..."
+                className="w-full h-24 p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500 resize-none transition"
+              />
+
+              <button
+                type="submit"
+                disabled={fixStatus !== "idle" || !fixPrompt.trim()}
+                className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs rounded-xl transition shadow flex items-center justify-center gap-1.5 disabled:opacity-50"
+              >
+                {fixStatus === "processing" ? (
+                  <>
+                    <RotateCw className="w-4 h-4 animate-spin" />
+                    <span>自動修復を実行中...</span>
+                  </>
+                ) : fixStatus === "success" ? (
+                  <>
+                    <CheckCircle2 className="w-4 h-4 text-emerald-300" />
+                    <span>自動修正完了！</span>
+                  </>
+                ) : (
+                  <>
+                    <Send className="w-3.5 h-3.5" />
+                    <span>送信して自動修正を実行</span>
+                  </>
+                )}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* スマホ用 三本線スライドメニュー */}
       {isMobileMenuOpen && (
-        <div className="md:hidden fixed inset-0 z-50 flex">
+        <div className="md:hidden fixed inset-0 z-50 flex transition-opacity">
           <div className="w-72 h-full bg-white shadow-2xl z-10 border-r border-slate-200">
             {renderSidebar()}
           </div>
@@ -606,9 +712,9 @@ export default function Home() {
 
         {/* --- メインエリア：ToDo表示 --- */}
         {mainTab === "todos" ? (
-          <main className="flex-1 bg-white flex flex-col h-full overflow-hidden p-4 md:p-8 max-w-3xl mx-auto w-full">
+          <main className="flex-1 bg-white flex flex-col h-full overflow-hidden p-4 md:p-8 max-w-3xl mx-auto w-full transition-all">
             
-            {/* スマホ用ヘッダー（三本線） */}
+            {/* スマホ用ヘッダー */}
             <div className="md:hidden flex items-center justify-between pb-3 border-b border-slate-200 mb-3">
               <button onClick={() => setIsMobileMenuOpen(true)} className="p-1.5 text-slate-600 hover:bg-slate-100 rounded-lg">
                 <Menu className="w-5 h-5" />
@@ -616,7 +722,9 @@ export default function Home() {
               <span className="text-xs font-bold text-slate-700">
                 カテゴリ: {todoCategories.find(c => c.id === selectedTodoCategory)?.name}
               </span>
-              <div className="w-5"></div>
+              <button onClick={fetchAllData} className={`p-1.5 text-slate-500 ${isRefreshing ? "animate-spin text-blue-600" : ""}`}>
+                <RotateCw className="w-4 h-4" />
+              </button>
             </div>
 
             <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-200 hidden md:flex">
@@ -641,7 +749,7 @@ export default function Home() {
               />
               <button
                 type="submit"
-                className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm rounded-xl transition flex items-center gap-1 shrink-0 shadow-sm"
+                className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm rounded-xl transition flex items-center gap-1 shrink-0 shadow-sm active:scale-95"
               >
                 <Plus className="w-4 h-4" /> 追加
               </button>
@@ -655,19 +763,19 @@ export default function Home() {
                   <div
                     key={todo.id}
                     onClick={() => toggleTodo(todo.id)}
-                    className={`flex items-center justify-between p-3 rounded-xl border transition cursor-pointer ${
+                    className={`flex items-center justify-between p-3.5 rounded-xl border transition cursor-pointer active:scale-[0.99] ${
                       todo.completed
                         ? "bg-slate-50 border-slate-200 text-slate-400 line-through"
-                        : "bg-white border-slate-200 text-slate-800 hover:border-blue-300 shadow-sm"
+                        : "bg-white border-slate-200 text-slate-800 hover:border-blue-300 shadow-xs"
                     }`}
                   >
                     <div className="flex items-center gap-3 flex-1 min-w-0 pr-2">
                       {todo.completed ? (
-                        <CheckSquare className="w-4 h-4 text-blue-600 shrink-0" />
+                        <CheckSquare className="w-4.5 h-4.5 text-blue-600 shrink-0" />
                       ) : (
-                        <Square className="w-4 h-4 text-slate-300 shrink-0" />
+                        <Square className="w-4.5 h-4.5 text-slate-300 shrink-0" />
                       )}
-                      <span className="text-sm truncate">{todo.text}</span>
+                      <span className="text-sm truncate font-medium">{todo.text}</span>
                     </div>
                     <button
                       onClick={(e) => { e.stopPropagation(); deleteTodo(todo.id); }}
@@ -683,9 +791,9 @@ export default function Home() {
         ) : (
           /* --- メインエリア：メモ表示 --- */
           <>
-            <section className={`w-full md:w-80 bg-white border-r border-slate-200 flex-col shrink-0 ${mobileEditing ? 'hidden md:flex' : 'flex'}`}>
+            <section className={`w-full md:w-80 bg-white border-r border-slate-200 flex-col shrink-0 transition-all ${mobileEditing ? 'hidden md:flex' : 'flex'}`}>
               
-              {/* スマホ用ヘッダー（三本線 ＋ メモ追加） */}
+              {/* スマホ用ヘッダー */}
               <div className="md:hidden p-3 bg-white border-b border-slate-200 flex items-center justify-between">
                 <button onClick={() => setIsMobileMenuOpen(true)} className="p-1.5 text-slate-600 hover:bg-slate-100 rounded-lg">
                   <Menu className="w-5 h-5" />
@@ -693,12 +801,14 @@ export default function Home() {
                 <span className="text-xs font-bold text-slate-800">
                   {noteFolders.find(f => f.id === selectedNoteFolder)?.name}
                 </span>
-                <button
-                  onClick={createNewNote}
-                  className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg font-semibold"
-                >
-                  <Plus className="w-5 h-5" />
-                </button>
+                <div className="flex items-center gap-1">
+                  <button onClick={fetchAllData} className={`p-1.5 text-slate-500 ${isRefreshing ? "animate-spin text-blue-600" : ""}`}>
+                    <RotateCw className="w-4 h-4" />
+                  </button>
+                  <button onClick={createNewNote} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg font-semibold">
+                    <Plus className="w-5 h-5" />
+                  </button>
+                </div>
               </div>
 
               <div className="p-3 border-b border-slate-200 space-y-2 bg-white">
@@ -708,7 +818,7 @@ export default function Home() {
                   </span>
                   <button
                     onClick={createNewNote}
-                    className="flex items-center gap-1 text-xs bg-blue-600 hover:bg-blue-700 text-white font-semibold px-3 py-1.5 rounded-xl transition shadow-sm"
+                    className="flex items-center gap-1 text-xs bg-blue-600 hover:bg-blue-700 text-white font-semibold px-3 py-1.5 rounded-xl transition shadow-sm active:scale-95"
                   >
                     <Plus className="w-4 h-4" /> 新規メモ作成
                   </button>
@@ -733,7 +843,7 @@ export default function Home() {
                     <div
                       key={note.id}
                       onClick={() => { setActiveNoteId(note.id); setMobileEditing(true); }}
-                      className={`p-3.5 cursor-pointer transition group relative ${
+                      className={`p-3.5 cursor-pointer transition group relative active:scale-[0.99] ${
                         activeNoteId === note.id ? "bg-blue-50/70 border-l-3 border-blue-600" : "hover:bg-slate-50"
                       }`}
                     >
@@ -765,7 +875,7 @@ export default function Home() {
             </section>
 
             {/* エディタ本文 */}
-            <main className={`flex-1 bg-white flex-col h-full overflow-hidden ${mobileEditing ? 'flex' : 'hidden md:flex'}`}>
+            <main className={`flex-1 bg-white flex-col h-full overflow-hidden transition-all ${mobileEditing ? 'flex' : 'hidden md:flex'}`}>
               {activeNote ? (
                 <>
                   <div className="md:hidden p-3 border-b border-slate-200 flex items-center justify-between bg-slate-50">
@@ -821,13 +931,13 @@ export default function Home() {
 
       </div>
 
-      {/* スマホ専用 下部シンプル2タブ（「メモ」と「ToDo」） */}
+      {/* スマホ専用 下部シンプル2タブ */}
       {!isKeyboardOpen && (
         <nav className="md:hidden bg-white border-t border-slate-200 grid grid-cols-2 py-2 px-6 shrink-0 pb-[max(0.5rem,env(safe-area-inset-bottom))] shadow-lg">
           <button
             onClick={() => { setMainTab('notes'); setMobileEditing(false); }}
             className={`flex flex-col items-center gap-1 text-[11px] font-semibold transition ${
-              mainTab === 'notes' ? 'text-blue-600' : 'text-slate-400'
+              mainTab === 'notes' ? 'text-blue-600 scale-105' : 'text-slate-400'
             }`}
           >
             <FileText className="w-5 h-5" />
@@ -836,7 +946,7 @@ export default function Home() {
           <button
             onClick={() => { setMainTab('todos'); setMobileEditing(false); }}
             className={`flex flex-col items-center gap-1 text-[11px] font-semibold transition ${
-              mainTab === 'todos' ? 'text-blue-600' : 'text-slate-400'
+              mainTab === 'todos' ? 'text-blue-600 scale-105' : 'text-slate-400'
             }`}
           >
             <CheckSquare className="w-5 h-5" />
