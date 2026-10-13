@@ -56,12 +56,16 @@ export default function Home() {
   const [authError, setAuthError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // フォルダ（初期値は空にし、DBから取得した内容を信頼する）
+  // フォルダ（メモ用）
   const [noteFolders, setNoteFolders] = useState<FolderItem[]>([]);
   const [selectedNoteFolder, setSelectedNoteFolder] = useState<string>("");
 
-  const [todoCategories, setTodoCategories] = useState<FolderItem[]>([]);
-  const [selectedTodoCategory, setSelectedTodoCategory] = useState<string>("");
+  // カテゴリ（ToDo用）
+  const [todoCategories, setTodoCategories] = useState<FolderItem[]>([
+    { id: "work_todo", name: "仕事タスク" },
+    { id: "personal_todo", name: "プライベート" },
+  ]);
+  const [selectedTodoCategory, setSelectedTodoCategory] = useState<string>("work_todo");
 
   const [newFolderInput, setNewFolderInput] = useState("");
   const [showFolderInput, setShowFolderInput] = useState(false);
@@ -81,7 +85,7 @@ export default function Home() {
   const [mobileEditing, setMobileEditing] = useState(false);
   const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
 
-  // 全データ更新・アニメーション用状態
+  // 全データ更新状態
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   const editorRef = useRef<HTMLDivElement>(null);
@@ -122,7 +126,7 @@ export default function Home() {
     }
   }, [mounted]);
 
-  // クラウドデータ取得（完全DB準拠）
+  // クラウドデータ取得
   const fetchAllData = async () => {
     if (!user) return;
     setIsRefreshing(true);
@@ -136,38 +140,19 @@ export default function Home() {
         .eq("user_id", user.id);
 
       if (nfData && nfData.length > 0) {
-        const mapped = nfData.map((f) => ({ id: f.id, name: f.name }));
+        const mapped = nfData.map((f: any) => ({ id: f.id, name: f.name }));
         setNoteFolders(mapped);
         if (!selectedNoteFolder || !mapped.some((f) => f.id === selectedNoteFolder)) {
           setSelectedNoteFolder(mapped[0].id);
         }
       } else {
-        // 初回のみデフォルト作成
-        const defaultF = { id: "work_note_" + user.id.slice(0, 5), name: "仕事メモ" };
+        const defaultF = { id: "f_" + Date.now().toString(), name: "メイン" };
         await supabase.from("folders").insert({ id: defaultF.id, user_id: user.id, name: defaultF.name });
         setNoteFolders([defaultF]);
         setSelectedNoteFolder(defaultF.id);
       }
 
-      // 2. ToDo用カテゴリ取得（ローカル・DB兼用）
-      const { data: tcData } = await supabase
-        .from("todo_categories")
-        .select("*")
-        .eq("user_id", user.id);
-
-      if (tcData && tcData.length > 0) {
-        const mappedCategory = tcData.map((c) => ({ id: c.id, name: c.name }));
-        setTodoCategories(mappedCategory);
-        if (!selectedTodoCategory || !mappedCategory.some((c) => c.id === selectedTodoCategory)) {
-          setSelectedTodoCategory(mappedCategory[0].id);
-        }
-      } else {
-        const defaultC = { id: "work_todo_" + user.id.slice(0, 5), name: "仕事タスク" };
-        setTodoCategories([defaultC]);
-        setSelectedTodoCategory(defaultC.id);
-      }
-
-      // 3. メモ取得
+      // 2. メモ取得
       const { data: nData } = await supabase
         .from("notes")
         .select("*")
@@ -175,7 +160,7 @@ export default function Home() {
         .order("updated_at", { ascending: false });
 
       if (nData) {
-        const mapped = nData.map((n) => ({
+        const mapped = nData.map((n: any) => ({
           id: n.id,
           title: n.title,
           content: n.content,
@@ -187,7 +172,7 @@ export default function Home() {
         if (mapped.length > 0 && !activeNoteId) setActiveNoteId(mapped[0].id);
       }
 
-      // 4. ToDo取得
+      // 3. ToDo取得
       const { data: tData } = await supabase
         .from("todos")
         .select("*")
@@ -196,7 +181,7 @@ export default function Home() {
 
       if (tData) {
         setTodos(
-          tData.map((t) => ({
+          tData.map((t: any) => ({
             id: t.id,
             text: t.text,
             category: t.category || "work_todo",
@@ -266,7 +251,7 @@ export default function Home() {
     setUser(null);
   };
 
-  // --- フォルダ/カテゴリ 操作（完全DB永続化） ---
+  // --- フォルダ/カテゴリ 操作 ---
   const handleCreateFolder = async () => {
     if (!newFolderInput.trim() || !user) return;
     const supabase = getSupabase();
@@ -285,19 +270,13 @@ export default function Home() {
       });
 
       if (error) {
-        alert("フォルダの保存に失敗しました: " + error.message);
+        alert("フォルダの追加に失敗しました: " + error.message);
         setNoteFolders((prev) => prev.filter((f) => f.id !== newId));
       }
     } else {
       const newC = { id: newId, name: newName };
       setTodoCategories((prev) => [...prev, newC]);
       setSelectedTodoCategory(newId);
-
-      await supabase.from("todo_categories").insert({
-        id: newId,
-        user_id: user.id,
-        name: newName,
-      }).catch(() => {});
     }
 
     setNewFolderInput("");
@@ -332,7 +311,6 @@ export default function Home() {
       setTodoCategories(updated);
       if (selectedTodoCategory === folderId) setSelectedTodoCategory(updated[0]?.id || "");
 
-      await supabase.from("todo_categories").delete().eq("id", folderId).eq("user_id", user.id).catch(() => {});
       await supabase.from("todos").delete().eq("category", folderId).eq("user_id", user.id);
       setTodos((prev) => prev.filter((t) => t.category !== folderId));
     }
