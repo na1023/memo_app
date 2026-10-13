@@ -12,7 +12,6 @@ import {
   Pin,
   FileText,
   ChevronLeft,
-  ChevronRight,
   Bold,
   Italic,
   List,
@@ -21,6 +20,7 @@ import {
   Upload,
   CheckSquare,
   Square,
+  Menu,
   X,
 } from "lucide-react";
 
@@ -46,10 +46,15 @@ interface FolderItem {
   name: string;
 }
 
-const DEFAULT_FOLDERS: FolderItem[] = [
-  { id: "work", name: "仕事" },
-  { id: "personal", name: "プライベート" },
-  { id: "ideas", name: "アイデア" },
+const DEFAULT_NOTE_FOLDERS: FolderItem[] = [
+  { id: "work_note", name: "仕事メモ" },
+  { id: "personal_note", name: "プライベート" },
+  { id: "ideas_note", name: "アイデア" },
+];
+
+const DEFAULT_TODO_CATEGORIES: FolderItem[] = [
+  { id: "work_todo", name: "仕事タスク" },
+  { id: "personal_todo", name: "プライベート" },
 ];
 
 export default function Home() {
@@ -61,13 +66,17 @@ export default function Home() {
   const [authError, setAuthError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // フォルダ
-  const [folders, setFolders] = useState<FolderItem[]>(DEFAULT_FOLDERS);
-  const [newFolderName, setNewFolderName] = useState("");
-  const [showFolderInput, setShowFolderInput] = useState(false);
-  const [selectedFolder, setSelectedFolder] = useState<string>("work");
+  // フォルダ（メモ用 / ToDo用 を完全分離）
+  const [noteFolders, setNoteFolders] = useState<FolderItem[]>(DEFAULT_NOTE_FOLDERS);
+  const [selectedNoteFolder, setSelectedNoteFolder] = useState<string>("work_note");
+  
+  const [todoCategories, setTodoCategories] = useState<FolderItem[]>(DEFAULT_TODO_CATEGORIES);
+  const [selectedTodoCategory, setSelectedTodoCategory] = useState<string>("work_todo");
 
-  // メモ & ToDo
+  const [newFolderInput, setNewFolderInput] = useState("");
+  const [showFolderInput, setShowFolderInput] = useState(false);
+
+  // メモ & ToDo データ
   const [notes, setNotes] = useState<Note[]>([]);
   const [todos, setTodos] = useState<Todo[]>([]);
   const [newTodoText, setNewTodoText] = useState("");
@@ -77,7 +86,8 @@ export default function Home() {
   // メイン画面の表示モード ( 'notes' | 'todos' )
   const [mainTab, setMainTab] = useState<"notes" | "todos">("notes");
 
-  // モバイルでメモ本文を開いているかのフラグ
+  // スマホ用 サイドバー開閉 & モバイル編集状態
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [mobileEditing, setMobileEditing] = useState(false);
   const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
 
@@ -126,11 +136,13 @@ export default function Home() {
       try {
         const supabase = getSupabase();
         
-        const { data: fData } = await supabase.from("folders").select("*");
-        if (fData && fData.length > 0) {
-          setFolders(fData.map(f => ({ id: f.id, name: f.name })));
+        // メモ用フォルダ取得
+        const { data: nfData } = await supabase.from("folders").select("*");
+        if (nfData && nfData.length > 0) {
+          setNoteFolders(nfData.map(f => ({ id: f.id, name: f.name })));
         }
 
+        // メモ取得
         const { data: nData } = await supabase.from("notes").select("*").order("updated_at", { ascending: false });
         if (nData) {
           const mapped = nData.map((n) => ({
@@ -145,12 +157,13 @@ export default function Home() {
           if (mapped.length > 0 && !activeNoteId) setActiveNoteId(mapped[0].id);
         }
 
+        // ToDo取得
         const { data: tData } = await supabase.from("todos").select("*").order("created_at", { ascending: false });
         if (tData) {
           setTodos(tData.map((t) => ({
             id: t.id,
             text: t.text,
-            category: t.category || "work",
+            category: t.category || "work_todo",
             completed: t.completed || false,
             createdAt: t.created_at,
           })));
@@ -210,35 +223,51 @@ export default function Home() {
     setUser(null);
   };
 
-  // --- フォルダ操作 ---
-  const createFolder = async () => {
-    if (!newFolderName.trim() || !user) return;
-    const newFolder: FolderItem = { id: Date.now().toString(), name: newFolderName.trim() };
-    setFolders([...folders, newFolder]);
-    setSelectedFolder(newFolder.id);
-    setNewFolderName("");
-    setShowFolderInput(false);
+  // --- フォルダ/カテゴリ 操作 ---
+  const handleCreateFolder = async () => {
+    if (!newFolderInput.trim() || !user) return;
+    const newId = Date.now().toString();
+    const newName = newFolderInput.trim();
 
-    const supabase = getSupabase();
-    await supabase.from("folders").insert({ id: newFolder.id, user_id: user.id, name: newFolder.name });
+    if (mainTab === "notes") {
+      const newF = { id: newId, name: newName };
+      setNoteFolders([...noteFolders, newF]);
+      setSelectedNoteFolder(newId);
+      const supabase = getSupabase();
+      await supabase.from("folders").insert({ id: newId, user_id: user.id, name: newName });
+    } else {
+      const newC = { id: newId, name: newName };
+      setTodoCategories([...todoCategories, newC]);
+      setSelectedTodoCategory(newId);
+    }
+
+    setNewFolderInput("");
+    setShowFolderInput(false);
   };
 
-  const deleteFolder = async (folderId: string, e: React.MouseEvent) => {
+  const handleDeleteFolder = async (folderId: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (folders.length <= 1) {
-      alert("最後のフォルダは削除できません。");
-      return;
+    if (mainTab === "notes") {
+      if (noteFolders.length <= 1) return alert("最後のフォルダは削除できません。");
+      if (!confirm("このフォルダを削除しますか？（中のメモも削除されます）")) return;
+
+      const updated = noteFolders.filter((f) => f.id !== folderId);
+      setNoteFolders(updated);
+      if (selectedNoteFolder === folderId) setSelectedNoteFolder(updated[0].id);
+
+      const supabase = getSupabase();
+      await supabase.from("folders").delete().eq("id", folderId);
+      await supabase.from("notes").delete().eq("folder_id", folderId);
+      setNotes(notes.filter((n) => n.folderId !== folderId));
+    } else {
+      if (todoCategories.length <= 1) return alert("最後のカテゴリは削除できません。");
+      if (!confirm("このカテゴリを削除しますか？")) return;
+
+      const updated = todoCategories.filter((c) => c.id !== folderId);
+      setTodoCategories(updated);
+      if (selectedTodoCategory === folderId) setSelectedTodoCategory(updated[0].id);
+      setTodos(todos.filter((t) => t.category !== folderId));
     }
-    if (!confirm("このフォルダを削除しますか？（中のメモも削除されます）")) return;
-
-    const updated = folders.filter((f) => f.id !== folderId);
-    setFolders(updated);
-    if (selectedFolder === folderId) setSelectedFolder(updated[0].id);
-
-    const supabase = getSupabase();
-    await supabase.from("folders").delete().eq("id", folderId);
-    await supabase.from("notes").delete().eq("folder_id", folderId);
-    setNotes(notes.filter((n) => n.folderId !== folderId));
   };
 
   // --- メモ操作 ---
@@ -249,7 +278,7 @@ export default function Home() {
       id: Date.now().toString(),
       title: "新規メモ",
       content: "",
-      folderId: selectedFolder,
+      folderId: selectedNoteFolder,
       isPinned: false,
       updatedAt: new Date().toLocaleDateString("ja-JP", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }),
     };
@@ -302,7 +331,7 @@ export default function Home() {
     const newTodo: Todo = {
       id: Date.now().toString(),
       text: newTodoText.trim(),
-      category: selectedFolder,
+      category: selectedTodoCategory,
       completed: false,
       createdAt: new Date().toLocaleDateString("ja-JP"),
     };
@@ -341,7 +370,7 @@ export default function Home() {
 
   // --- エクスポート & インポート ---
   const exportData = () => {
-    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify({ folders, notes, todos }, null, 2));
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify({ noteFolders, todoCategories, notes, todos }, null, 2));
     const downloadAnchor = document.createElement("a");
     downloadAnchor.setAttribute("href", dataStr);
     downloadAnchor.setAttribute("download", `SmartHub_Backup_${new Date().toISOString().slice(0, 10)}.json`);
@@ -357,14 +386,15 @@ export default function Home() {
       fileReader.onload = async (event) => {
         try {
           const parsed = JSON.parse(event.target?.result as string);
-          if (parsed.folders && parsed.notes && user) {
-            setFolders(parsed.folders);
-            setNotes(parsed.notes);
+          if (parsed && user) {
+            if (parsed.noteFolders) setNoteFolders(parsed.noteFolders);
+            if (parsed.todoCategories) setTodoCategories(parsed.todoCategories);
+            if (parsed.notes) setNotes(parsed.notes);
             if (parsed.todos) setTodos(parsed.todos);
             alert("データを復元しました！");
           }
         } catch (err) {
-          alert("ファイルの読み込み中にエラーが発生しました。");
+          alert("ファイルの読み込みに失敗しました。");
         }
       };
     }
@@ -376,16 +406,19 @@ export default function Home() {
   };
 
   const filteredNotes = notes
-    .filter((n) => n.folderId === selectedFolder)
+    .filter((n) => n.folderId === selectedNoteFolder)
     .filter((n) => n.title.toLowerCase().includes(searchQuery.toLowerCase()) || n.content.toLowerCase().includes(searchQuery.toLowerCase()))
     .sort((a, b) => (b.isPinned ? 1 : 0) - (a.isPinned ? 1 : 0));
 
-  const filteredTodos = todos.filter((t) => t.category === selectedFolder);
+  const filteredTodos = todos.filter((t) => t.category === selectedTodoCategory);
+
+  const activeFolders = mainTab === "notes" ? noteFolders : todoCategories;
+  const activeSelectedFolder = mainTab === "notes" ? selectedNoteFolder : selectedTodoCategory;
 
   if (!user) {
     return (
       <div className="h-[100dvh] w-full bg-slate-100 flex items-center justify-center p-4">
-        <div className="bg-white border border-slate-200 rounded-2xl p-6 sm:p-8 max-w-md w-full shadow-lg space-y-6">
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 sm:p-8 max-w-md w-full shadow-md space-y-6">
           <div className="text-center space-y-1">
             <h1 className="text-2xl font-bold text-slate-900 tracking-tight">SmartHub</h1>
             <p className="text-xs text-slate-500">シンプルで使いやすいクラウド同期メモ帳</p>
@@ -452,105 +485,146 @@ export default function Home() {
     );
   }
 
+  // 共通サイドバー（PCは固定、スマホは三本線メニューでスライド表示）
+  const renderSidebar = () => (
+    <div className="h-full flex flex-col bg-white">
+      <div className="p-4 border-b border-slate-200 flex items-center justify-between">
+        <span className="font-bold text-slate-900 tracking-tight text-base">SmartHub</span>
+        <div className="flex items-center gap-2">
+          <button onClick={handleLogout} className="text-slate-400 hover:text-red-500 p-1 rounded-lg transition" title="ログアウト">
+            <LogOut className="w-4 h-4" />
+          </button>
+          <button onClick={() => setIsMobileMenuOpen(false)} className="md:hidden text-slate-400 hover:text-slate-600 p-1">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+      </div>
+
+      <div className="p-3 flex-1 overflow-y-auto space-y-3">
+        <div className="flex items-center justify-between px-1">
+          <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+            {mainTab === "notes" ? "メモ用フォルダ" : "ToDo用カテゴリ"}
+          </span>
+          <button
+            onClick={() => setShowFolderInput(!showFolderInput)}
+            className="text-xs text-blue-600 hover:underline flex items-center gap-1 font-medium"
+          >
+            <Plus className="w-3.5 h-3.5" /> 作成
+          </button>
+        </div>
+
+        {showFolderInput && (
+          <div className="flex gap-1.5 px-0.5">
+            <input
+              type="text"
+              value={newFolderInput}
+              onChange={(e) => setNewFolderInput(e.target.value)}
+              placeholder="フォルダ/カテゴリ名"
+              className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-800 focus:outline-none focus:border-blue-500"
+            />
+            <button
+              onClick={handleCreateFolder}
+              className="px-3 py-1.5 bg-blue-600 text-white font-semibold text-xs rounded-lg hover:bg-blue-700 transition"
+            >
+              追加
+            </button>
+          </div>
+        )}
+
+        <div className="space-y-0.5">
+          {activeFolders.map((f) => (
+            <div
+              key={f.id}
+              onClick={() => {
+                if (mainTab === "notes") setSelectedNoteFolder(f.id);
+                else setSelectedTodoCategory(f.id);
+                setIsMobileMenuOpen(false);
+              }}
+              className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-sm transition cursor-pointer group ${
+                activeSelectedFolder === f.id
+                  ? "bg-blue-50 text-blue-600 font-semibold"
+                  : "hover:bg-slate-100 text-slate-600"
+              }`}
+            >
+              <div className="flex items-center gap-2.5 truncate">
+                <Folder className="w-4 h-4 shrink-0" />
+                <span className="truncate">{f.name}</span>
+              </div>
+              <button
+                onClick={(e) => handleDeleteFolder(f.id, e)}
+                className="opacity-100 md:opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-red-500 transition"
+                title="削除"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="p-3 border-t border-slate-200 bg-slate-50/50 space-y-2">
+        <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-1">データ管理</div>
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            onClick={exportData}
+            className="flex items-center justify-center gap-1 px-2.5 py-1.5 bg-white border border-slate-200 hover:bg-slate-100 text-slate-600 rounded-lg text-xs font-medium transition shadow-sm"
+          >
+            <Download className="w-3.5 h-3.5" /> 保存
+          </button>
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            className="flex items-center justify-center gap-1 px-2.5 py-1.5 bg-white border border-slate-200 hover:bg-slate-100 text-slate-600 rounded-lg text-xs font-medium transition shadow-sm"
+          >
+            <Upload className="w-3.5 h-3.5" /> 復元
+          </button>
+          <input type="file" ref={fileInputRef} onChange={importData} accept=".json" className="hidden" />
+        </div>
+      </div>
+    </div>
+  );
+
   return (
     <div className="h-[100dvh] w-full bg-slate-50 text-slate-800 font-sans flex flex-col relative overflow-hidden">
       
+      {/* スマホ用 三本線スライドメニュー */}
+      {isMobileMenuOpen && (
+        <div className="md:hidden fixed inset-0 z-50 flex">
+          <div className="w-72 h-full bg-white shadow-2xl z-10 border-r border-slate-200">
+            {renderSidebar()}
+          </div>
+          <div className="flex-1 bg-slate-900/40" onClick={() => setIsMobileMenuOpen(false)}></div>
+        </div>
+      )}
+
       {/* メインレイアウト */}
       <div className="flex-1 flex overflow-hidden relative">
         
-        {/* PC・タブレット用サイドバー */}
-        <aside className="hidden md:flex w-64 bg-white border-r border-slate-200 flex-col shrink-0">
-          <div className="p-4 border-b border-slate-200 flex items-center justify-between">
-            <span className="font-bold text-slate-900 tracking-tight text-base">SmartHub</span>
-            <button onClick={handleLogout} className="text-slate-400 hover:text-red-500 p-1 rounded-lg transition" title="ログアウト">
-              <LogOut className="w-4 h-4" />
-            </button>
-          </div>
-
-          <div className="p-3 flex-1 overflow-y-auto space-y-3">
-            <div className="flex items-center justify-between px-1">
-              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">フォルダ</span>
-              <button
-                onClick={() => setShowFolderInput(!showFolderInput)}
-                className="text-xs text-blue-600 hover:underline flex items-center gap-1 font-medium"
-              >
-                <Plus className="w-3.5 h-3.5" /> 追加
-              </button>
-            </div>
-
-            {showFolderInput && (
-              <div className="flex gap-1.5 px-0.5">
-                <input
-                  type="text"
-                  value={newFolderName}
-                  onChange={(e) => setNewFolderName(e.target.value)}
-                  placeholder="フォルダ名"
-                  className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-800 focus:outline-none focus:border-blue-500"
-                />
-                <button
-                  onClick={createFolder}
-                  className="px-3 py-1.5 bg-blue-600 text-white font-semibold text-xs rounded-lg hover:bg-blue-700 transition"
-                >
-                  追加
-                </button>
-              </div>
-            )}
-
-            <div className="space-y-0.5">
-              {folders.map((f) => (
-                <div
-                  key={f.id}
-                  onClick={() => setSelectedFolder(f.id)}
-                  className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-sm transition cursor-pointer group ${
-                    selectedFolder === f.id
-                      ? "bg-blue-50 text-blue-600 font-semibold"
-                      : "hover:bg-slate-100 text-slate-600"
-                  }`}
-                >
-                  <div className="flex items-center gap-2.5 truncate">
-                    <Folder className="w-4 h-4 shrink-0" />
-                    <span className="truncate">{f.name}</span>
-                  </div>
-                  <button
-                    onClick={(e) => deleteFolder(f.id, e)}
-                    className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-red-500 transition"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="p-3 border-t border-slate-200 bg-slate-50/50 space-y-2">
-            <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-1">データバックアップ</div>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                onClick={exportData}
-                className="flex items-center justify-center gap-1 px-2.5 py-1.5 bg-white border border-slate-200 hover:bg-slate-100 text-slate-600 rounded-lg text-xs font-medium transition shadow-sm"
-              >
-                <Download className="w-3.5 h-3.5" /> 保存
-              </button>
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                className="flex items-center justify-center gap-1 px-2.5 py-1.5 bg-white border border-slate-200 hover:bg-slate-100 text-slate-600 rounded-lg text-xs font-medium transition shadow-sm"
-              >
-                <Upload className="w-3.5 h-3.5" /> 復元
-              </button>
-              <input type="file" ref={fileInputRef} onChange={importData} accept=".json" className="hidden" />
-            </div>
-          </div>
+        {/* PC用固定サイドバー */}
+        <aside className="hidden md:block w-64 border-r border-slate-200 shrink-0 h-full">
+          {renderSidebar()}
         </aside>
 
         {/* --- メインエリア：ToDo表示 --- */}
         {mainTab === "todos" ? (
           <main className="flex-1 bg-white flex flex-col h-full overflow-hidden p-4 md:p-8 max-w-3xl mx-auto w-full">
-            <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-200">
+            
+            {/* スマホ用ヘッダー（三本線） */}
+            <div className="md:hidden flex items-center justify-between pb-3 border-b border-slate-200 mb-3">
+              <button onClick={() => setIsMobileMenuOpen(true)} className="p-1.5 text-slate-600 hover:bg-slate-100 rounded-lg">
+                <Menu className="w-5 h-5" />
+              </button>
+              <span className="text-xs font-bold text-slate-700">
+                カテゴリ: {todoCategories.find(c => c.id === selectedTodoCategory)?.name}
+              </span>
+              <div className="w-5"></div>
+            </div>
+
+            <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-200 hidden md:flex">
               <div>
                 <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
                   <CheckSquare className="w-5 h-5 text-blue-600" /> ToDoタスク
                 </h2>
-                <p className="text-xs text-slate-500 mt-0.5">カテゴリ: {folders.find(f => f.id === selectedFolder)?.name}</p>
+                <p className="text-xs text-slate-500 mt-0.5">カテゴリ: {todoCategories.find(c => c.id === selectedTodoCategory)?.name}</p>
               </div>
               <span className="text-xs font-medium text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full">
                 {filteredTodos.filter(t => t.completed).length} / {filteredTodos.length} 完了
@@ -609,37 +683,32 @@ export default function Home() {
         ) : (
           /* --- メインエリア：メモ表示 --- */
           <>
-            {/* メモ一覧 (スマホで編集中の場合は非表示) */}
-            <section className={`w-full md:w-80 bg-slate-50/80 border-r border-slate-200 flex-col shrink-0 ${mobileEditing ? 'hidden md:flex' : 'flex'}`}>
+            <section className={`w-full md:w-80 bg-white border-r border-slate-200 flex-col shrink-0 ${mobileEditing ? 'hidden md:flex' : 'flex'}`}>
               
-              {/* スマホ用ヘッダー（フォルダ選択＆ログアウト） */}
+              {/* スマホ用ヘッダー（三本線 ＋ メモ追加） */}
               <div className="md:hidden p-3 bg-white border-b border-slate-200 flex items-center justify-between">
-                <div className="flex items-center gap-2 overflow-x-auto py-1 max-w-[80%]">
-                  {folders.map((f) => (
-                    <button
-                      key={f.id}
-                      onClick={() => setSelectedFolder(f.id)}
-                      className={`px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap transition ${
-                        selectedFolder === f.id ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600"
-                      }`}
-                    >
-                      {f.name}
-                    </button>
-                  ))}
-                </div>
-                <button onClick={handleLogout} className="text-slate-400 hover:text-red-500 p-1">
-                  <LogOut className="w-4 h-4" />
+                <button onClick={() => setIsMobileMenuOpen(true)} className="p-1.5 text-slate-600 hover:bg-slate-100 rounded-lg">
+                  <Menu className="w-5 h-5" />
+                </button>
+                <span className="text-xs font-bold text-slate-800">
+                  {noteFolders.find(f => f.id === selectedNoteFolder)?.name}
+                </span>
+                <button
+                  onClick={createNewNote}
+                  className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg font-semibold"
+                >
+                  <Plus className="w-5 h-5" />
                 </button>
               </div>
 
               <div className="p-3 border-b border-slate-200 space-y-2 bg-white">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-500 hidden md:inline">
-                    {folders.find(f => f.id === selectedFolder)?.name} ({filteredNotes.length})
+                <div className="hidden md:flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-500">
+                    {noteFolders.find(f => f.id === selectedNoteFolder)?.name} ({filteredNotes.length})
                   </span>
                   <button
                     onClick={createNewNote}
-                    className="w-full md:w-auto flex items-center justify-center gap-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white font-semibold px-3 py-2 md:py-1.5 rounded-xl transition shadow-sm"
+                    className="flex items-center gap-1 text-xs bg-blue-600 hover:bg-blue-700 text-white font-semibold px-3 py-1.5 rounded-xl transition shadow-sm"
                   >
                     <Plus className="w-4 h-4" /> 新規メモ作成
                   </button>
@@ -656,7 +725,7 @@ export default function Home() {
                 </div>
               </div>
 
-              <div className="flex-1 overflow-y-auto divide-y divide-slate-200/60 bg-white">
+              <div className="flex-1 overflow-y-auto divide-y divide-slate-100 bg-white">
                 {filteredNotes.length === 0 ? (
                   <div className="p-8 text-center text-xs text-slate-400">メモがありません</div>
                 ) : (
@@ -695,11 +764,10 @@ export default function Home() {
               </div>
             </section>
 
-            {/* エディタ本文（スマホで未選択時は非表示） */}
+            {/* エディタ本文 */}
             <main className={`flex-1 bg-white flex-col h-full overflow-hidden ${mobileEditing ? 'flex' : 'hidden md:flex'}`}>
               {activeNote ? (
                 <>
-                  {/* スマホ用「＜ メモ一覧へ戻る」バー */}
                   <div className="md:hidden p-3 border-b border-slate-200 flex items-center justify-between bg-slate-50">
                     <button onClick={() => setMobileEditing(false)} className="flex items-center gap-1 text-xs text-blue-600 font-semibold">
                       <ChevronLeft className="w-4 h-4" /> メモ一覧
@@ -708,7 +776,6 @@ export default function Home() {
                     <div className="w-8"></div>
                   </div>
 
-                  {/* ツールバー */}
                   <div className="p-2 border-b border-slate-200 flex items-center justify-between gap-2 bg-slate-50/50">
                     <div className="flex items-center gap-1">
                       <button onClick={() => formatExec("bold")} className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-200/60 transition" title="太字">
@@ -754,7 +821,7 @@ export default function Home() {
 
       </div>
 
-      {/* スマホ専用 下部シンプル2タブ（「メモ」と「ToDo」のみ） */}
+      {/* スマホ専用 下部シンプル2タブ（「メモ」と「ToDo」） */}
       {!isKeyboardOpen && (
         <nav className="md:hidden bg-white border-t border-slate-200 grid grid-cols-2 py-2 px-6 shrink-0 pb-[max(0.5rem,env(safe-area-inset-bottom))] shadow-lg">
           <button
